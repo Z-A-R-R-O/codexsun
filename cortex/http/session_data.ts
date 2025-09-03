@@ -24,13 +24,11 @@ export interface SessionCookieOptions {
 }
 
 /** Standard defaults used by our session middleware. */
-export const DEFAULT_SESSION_COOKIE: Required<Omit<SessionCookieOptions, "domain" | "secure" | "ttlSeconds">> & {
-    ttlSeconds: number;
-} = {
+export const DEFAULT_SESSION_COOKIE: Required<Omit<SessionCookieOptions, "domain">> = {
     name: "sid",
     path: "/",
     sameSite: "Lax",
-    secure: false,      // middleware will auto-upgrade to true on HTTPS
+    secure: false,        // middleware will auto-upgrade to true on HTTPS
     httpOnly: true,
     ttlSeconds: DEFAULT_SESSION_TTL_SECONDS,
 };

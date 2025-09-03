@@ -36,11 +36,10 @@ export function isOriginAllowed(cfg: OriginConfig | undefined, origin: string | 
     if (!cfg) return false;
     if (cfg === "*") return true;
     if (Array.isArray(cfg)) {
-        return cfg.some((c) => (typeof c === "string" ? c === origin : c instanceof RegExp ? c.test(origin) : false));
+        return cfg.some((c) => (typeof c === "string" ? c === origin : c.test(origin)));
     }
     if (typeof cfg === "string") return cfg === origin;
-    if (cfg instanceof RegExp) return cfg.test(origin);
-    return false;
+    return cfg.test(origin);
 }
 
 export function applyCorsHeaders(res: ServerResponse, req: IncomingMessage, cfg: CORSOptions): void {
