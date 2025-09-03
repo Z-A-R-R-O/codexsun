@@ -1,5 +1,5 @@
 // apps/cxsun/app.ts
-import type { RouteRegistry } from '../route_registry';
+import type { RouteRegistry } from '../../cortex/http/route_registry';
 import { tenantRouteProvider } from './src/tenant/code/tenant.api';
 
 export async function registerApp(registry: RouteRegistry) {

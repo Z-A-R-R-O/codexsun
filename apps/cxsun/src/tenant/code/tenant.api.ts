@@ -11,7 +11,7 @@ export async function tenantRouteProvider(): Promise<RouteDef[]> {
 
     return [
         // Health for tenant API
-        makeHealthRoute('/api/tenants/health'),
+        makeHealthRoute('/api/tenants/healthz'),
 
         // List tenants
         {
