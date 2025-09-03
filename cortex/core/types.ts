@@ -1,16 +1,16 @@
-// branded types (type-safe at compile time)
-export type PrimaryKey = number & { __pk: true };
-export type Email = string & { __email: true };
-export type Hashed = string & { __hashed: true };
-export type Bool = boolean & { __bool: true };
-export type DateTime = Date & { __datetime: true };
-export type Str = string & { __str: true };
-
-// column types for schema
 export enum ColumnType {
+    Primary = "primary",
     String = "string",
+    Email = "email",
     Boolean = "boolean",
     DateTime = "datetime",
-    Primary = "primary",
-    Email = "email",
+    SoftDelete = "softdelete", // 🔥 new
 }
+
+// branded types
+export type PrimaryKey = number & { __brand: "pk" };
+export type Str = string & { __brand: "str" };
+export type Email = string & { __brand: "email" };
+export type Bool = boolean & { __brand: "bool" };
+export type DateTime = Date & { __brand: "datetime" };
+export type SoftDelete = Date | null;

@@ -1,6 +1,6 @@
 import { Model } from "../../../../cortex/core/model";
-import { PrimaryKey, Email as EmailType, Str, Bool, DateTime } from "../../../../cortex/core/types";
-import { PrimaryKey as PK, Email, String, BooleanCol, DateTime as DateTimeCol } from "../../../../cortex/core/decorators";
+import {PrimaryKey, Email as EmailType, Str, Bool, DateTime, SoftDelete} from "../../../../cortex/core/types";
+import { PrimaryKey as PK, Email, String, BooleanCol, DateTime as DateTimeCol, SoftDeleteCol } from "../../../../cortex/core/decorators";
 
 export class User extends Model {
     public static table = "users";
@@ -25,4 +25,7 @@ export class User extends Model {
 
     @DateTimeCol()
     updated_at!: DateTime;
+
+    @SoftDeleteCol()
+    deleted_at!: SoftDelete;
 }

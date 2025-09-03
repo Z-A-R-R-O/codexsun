@@ -1,6 +1,6 @@
 // cortex/database/db.ts
 // Entry point for multi-tenant, high-concurrency database access.
-// - Master DB (MDB_*) holds core tables + tenant registry table `tenants`
+// - Master DB (MDB_*) holds core tables
 // - Per-tenant DBs are provisioned on-demand, executed, and closed
 // - Concurrency per-tenant and for shared operations is capped via a lightweight semaphore
 
@@ -8,7 +8,7 @@ import type { Engine } from "./Engine";
 import { makeConfigKey, type DBConfig, type DBDriver } from "./types";
 import * as cm from "./connection_manager";
 import { getDbConfig } from "./getDbConfig";
-import * as core from "./core_table"; // <-- wire core tables (features, plans, subscriptions, app_settings, activations)
+import * as core from "./core_table";
 
 // Engines for per-tenant ephemeral connections
 import { SqliteEngine } from "./engines/sqlite_engine";
@@ -20,21 +20,6 @@ import { MysqlEngine } from "./engines/mysql_engine";
  * Types / shapes
  * ---------------------------------------------------------------------------------------------- */
 export type Profile = "default" | (string & {});
-
-/** Row in the master tenant registry */
-interface TenantRow {
-    tenant_id: string;            // business key for tenant
-    driver: DBDriver;             // postgres/mysql/mariadb/sqlite/mongodb
-    host?: string | null;
-    port?: number | null;
-    db_name: string;
-    ssl?: number | null;          // 0/1
-    params_json?: string | null;  // extra driver params e.g. { url: "postgres://..." }
-    pool_min?: number | null;
-    pool_max?: number | null;
-    pool_idle_ms?: number | null;
-    pool_acquire_timeout_ms?: number | null;
-}
 
 /** Minimal connection façade for consumers */
 export interface ConnFacade {
@@ -139,43 +124,7 @@ function mustTenantId(explicit?: string): string {
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Master (MDB) tenants registry helpers
- * ---------------------------------------------------------------------------------------------- */
-let ensuredTenantsTable = false;
-
-async function ensureTenantTable(): Promise<void> {
-    if (ensuredTenantsTable) return;
-    const ddl = `CREATE TABLE IF NOT EXISTS tenants (
-                                                        tenant_id TEXT PRIMARY KEY,
-                                                        driver TEXT NOT NULL CHECK (driver IN ('postgres','mysql','mariadb','sqlite','mongodb')),
-        host TEXT,
-        port INTEGER,
-        db_name TEXT NOT NULL,
-        ssl INTEGER DEFAULT 0,
-        params_json TEXT,
-        pool_min INTEGER,
-        pool_max INTEGER,
-        pool_idle_ms INTEGER,
-        pool_acquire_timeout_ms INTEGER,
-        updated_at TEXT DEFAULT (datetime('now'))
-        );`;
-    await withShared((conn) => conn.Query(ddl));
-    ensuredTenantsTable = true;
-}
-
-async function getTenantRow(tenantId: string): Promise<TenantRow | null> {
-    await ensureTenantTable();
-    const row = await fetchOneShared<TenantRow>(
-        `SELECT tenant_id, driver, host, port, db_name, ssl,
-                params_json, pool_min, pool_max, pool_idle_ms, pool_acquire_timeout_ms
-         FROM tenants WHERE tenant_id = ?`,
-        [tenantId]
-    );
-    return row ?? null;
-}
-
-/* ------------------------------------------------------------------------------------------------
- * Env-based tenant fallback
+ * Env-based tenant config
  * ---------------------------------------------------------------------------------------------- */
 function parseBool(v: string | undefined): boolean | undefined {
     if (v == null) return undefined;
@@ -242,39 +191,6 @@ function buildEnvTenantConfig(tenantId: string): DBConfig | null {
 /* ------------------------------------------------------------------------------------------------
  * Engine factory (per-tenant ephemeral)
  * ---------------------------------------------------------------------------------------------- */
-function makeTenantConfig(tenant: TenantRow): DBConfig {
-    const profile = `tenant:${tenant.tenant_id}`;
-    const base: any = {
-        profile,
-        driver: tenant.driver,
-        host: tenant.host ?? undefined,
-        port: tenant.port ?? undefined,
-        database: tenant.db_name,
-        ssl: tenant.ssl ? true : undefined,
-        pool: {
-            min: tenant.pool_min ?? undefined,
-            max: tenant.pool_max ?? undefined,
-            idleMillis: tenant.pool_idle_ms ?? undefined,
-            acquireTimeoutMillis: tenant.pool_acquire_timeout_ms ?? undefined,
-        },
-    };
-
-    if (tenant.params_json) {
-        try {
-            const extra = JSON.parse(tenant.params_json);
-            Object.assign(base, extra);
-            if (extra.pool && typeof extra.pool === "object") {
-                Object.assign(base.pool, extra.pool);
-            }
-        } catch {
-            // ignore malformed JSON
-        }
-    }
-
-    base.cfgKey = makeConfigKey(base);
-    return base as DBConfig;
-}
-
 function buildEngine(cfg: DBConfig): Engine {
     switch (cfg.driver) {
         case "sqlite":
@@ -286,12 +202,9 @@ function buildEngine(cfg: DBConfig): Engine {
         case "mysql":
             return new MysqlEngine(cfg as any);
         case "mongodb": {
-            // Optional/dynamic load to avoid build-time dependency if not present yet
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const modPath = "./engines/mongodb_engine";
             try {
-                // @ts-ignore - optional dependency
-                const { MongoDBEngine } = require(modPath);
+                // eslint-disable-next-line @typescript-eslint/no-var-requires
+                const { MongoDBEngine } = require("./engines/mongodb_engine");
                 return new MongoDBEngine(cfg as any);
             } catch {
                 throw new Error(
@@ -310,8 +223,7 @@ function buildEngine(cfg: DBConfig): Engine {
  * Public API – Shared (master) helpers
  * ---------------------------------------------------------------------------------------------- */
 export async function withShared<T>(fn: (conn: ConnFacade) => Promise<T>): Promise<T> {
-    // Ensure core master tables exist before any shared operation
-    await core.run();
+    await core.run(); // ensure core tables
 
     const sem = getSemaphore("shared", true);
     return sem.run(async () => {
@@ -331,37 +243,9 @@ export async function withShared<T>(fn: (conn: ConnFacade) => Promise<T>): Promi
     });
 }
 
-export async function withSharedTx<T>(fn: (conn: ConnFacade) => Promise<T>): Promise<T> {
-    return withShared(async (conn) => {
-        await conn.Begin();
-        try {
-            const result = await fn(conn);
-            await conn.Commit();
-            return result;
-        } catch (err) {
-            try { await conn.Rollback(); } catch {}
-            throw err;
-        }
-    });
-}
-
-export async function queryShared(sql: string, params?: unknown): Promise<any> {
-    return withShared((c) => c.Query(sql, params));
-}
-export async function fetchOneShared<T = any>(sql: string, params?: unknown): Promise<T | null> {
-    return withShared((c) => c.FetchOne<T>(sql, params));
-}
-export async function fetchAllShared<T = any>(sql: string, params?: unknown): Promise<T[]> {
-    return withShared((c) => c.FetchAll<T>(sql, params));
-}
-export async function healthzShared(): Promise<boolean> {
-    return withShared((c) => c.Healthz());
-}
-
 /* ------------------------------------------------------------------------------------------------
- * Public API – Tenant helpers (supports DEFAULT_TENANT)
+ * Public API – Tenant helpers (uses env or DEFAULT_TENANT)
  * ---------------------------------------------------------------------------------------------- */
-// Overloads allow omitting tenantId when DEFAULT_TENANT is set
 export async function withTenant<T>(tenantId: string, fn: (conn: ConnFacade) => Promise<T>): Promise<T>;
 export async function withTenant<T>(fn: (conn: ConnFacade) => Promise<T>): Promise<T>;
 export async function withTenant<T>(a: any, b?: any): Promise<T> {
@@ -370,11 +254,10 @@ export async function withTenant<T>(a: any, b?: any): Promise<T> {
 
     const sem = getSemaphore(`tenant:${tenantId}`, false);
     return sem.run(async () => {
-        const row = await getTenantRow(tenantId);
-        const cfg = row ? makeTenantConfig(row) : buildEnvTenantConfig(tenantId);
+        const cfg = buildEnvTenantConfig(tenantId);
         if (!cfg) {
             throw new Error(
-                `Unknown tenant '${tenantId}'. Add a row in 'tenants' table or set TENANT_${tenantId}_DB_URL (or DB_URL/DB_* envs).`
+                `Unknown tenant '${tenantId}'. Set TENANT_${tenantId}_DB_URL (or DB_URL/DB_* envs).`
             );
         }
 
@@ -398,121 +281,3 @@ export async function withTenant<T>(a: any, b?: any): Promise<T> {
         }
     });
 }
-
-export async function withTenantTx<T>(tenantId: string, fn: (conn: ConnFacade) => Promise<T>): Promise<T>;
-export async function withTenantTx<T>(fn: (conn: ConnFacade) => Promise<T>): Promise<T>;
-export async function withTenantTx<T>(a: any, b?: any): Promise<T> {
-    const tenantId = typeof a === "string" ? a : undefined;
-    const fn: (conn: ConnFacade) => Promise<T> = typeof a === "string" ? b : a;
-
-    return withTenant<T>(tenantId ?? mustTenantId(undefined), async (conn) => {
-        await conn.Begin();
-        try {
-            const result = await fn(conn);
-            await conn.Commit();
-            return result;
-        } catch (err) {
-            try { await conn.Rollback(); } catch {}
-            throw err;
-        }
-    });
-}
-
-export async function queryTenant(tenantId: string, sql: string, params?: unknown): Promise<any>;
-export async function queryTenant(sql: string, params?: unknown): Promise<any>;
-export async function queryTenant(a: any, b?: any, c?: any): Promise<any> {
-    const hasTenant = typeof a === "string" && typeof b === "string";
-    const tenantId = hasTenant ? a : mustTenantId(undefined);
-    const sql = hasTenant ? b : a;
-    const params = hasTenant ? c : b;
-    return withTenant(tenantId, (cconn) => cconn.Query(sql, params));
-}
-
-export async function fetchOneTenant<T = any>(tenantId: string, sql: string, params?: unknown): Promise<T | null>;
-export async function fetchOneTenant<T = any>(sql: string, params?: unknown): Promise<T | null>;
-export async function fetchOneTenant<T = any>(a: any, b?: any, c?: any): Promise<T | null> {
-    const hasTenant = typeof a === "string" && typeof b === "string";
-    const tenantId = hasTenant ? a : mustTenantId(undefined);
-    const sql = hasTenant ? b : a;
-    const params = hasTenant ? c : b;
-    return withTenant(tenantId, (cconn) => cconn.FetchOne<T>(sql, params));
-}
-
-export async function fetchAllTenant<T = any>(tenantId: string, sql: string, params?: unknown): Promise<T[]>;
-export async function fetchAllTenant<T = any>(sql: string, params?: unknown): Promise<T[]>;
-export async function fetchAllTenant<T = any>(a: any, b?: any, c?: any): Promise<T[]> {
-    const hasTenant = typeof a === "string" && typeof b === "string";
-    const tenantId = hasTenant ? a : mustTenantId(undefined);
-    const sql = hasTenant ? b : a;
-    const params = hasTenant ? c : b;
-    return withTenant(tenantId, (cconn) => cconn.FetchAll<T>(sql, params));
-}
-
-export async function execManyTenant(tenantId: string, sql: string, paramSets: unknown[]): Promise<any>;
-export async function execManyTenant(sql: string, paramSets: unknown[]): Promise<any>;
-export async function execManyTenant(a: any, b: any, c?: any): Promise<any> {
-    const hasTenant = typeof a === "string" && typeof b === "string";
-    const tenantId = hasTenant ? a : mustTenantId(undefined);
-    const sql = hasTenant ? b : a;
-    const sets = hasTenant ? c : b;
-    return withTenant(tenantId, (cconn) => cconn.ExecuteMany(sql, sets));
-}
-
-export async function healthzTenant(tenantId?: string): Promise<boolean> {
-    const tid = mustTenantId(tenantId);
-    return withTenant(tid, (cconn) => cconn.Healthz());
-}
-
-/* ------------------------------------------------------------------------------------------------
- * Facade namespaces: mdb (master/shared) and db (tenant)
- * ---------------------------------------------------------------------------------------------- */
-const mdb = {
-    with: withShared,
-    withTx: withSharedTx,
-    query: queryShared,
-    fetchOne: fetchOneShared,
-    fetchAll: fetchAllShared,
-    healthz: healthzShared,
-};
-
-const db = {
-    with: withTenant,
-    withTx: withTenantTx,
-    query: queryTenant,
-    fetchOne: fetchOneTenant,
-    fetchAll: fetchAllTenant,
-    execMany: execManyTenant,
-    healthz: healthzTenant,
-};
-
-/* ------------------------------------------------------------------------------------------------
- * Teardown helpers
- * ---------------------------------------------------------------------------------------------- */
-export async function teardownAll(): Promise<void> {
-    await cm.teardownAll();
-    semaphores.clear();
-    ensuredTenantsTable = false;
-}
-export async function teardown(): Promise<void> {
-    return teardownAll();
-}
-
-/* ------------------------------------------------------------------------------------------------
- * Boot-time assertion: prefer MDB_* for master, else warn
- * ---------------------------------------------------------------------------------------------- */
-(function assertSharedDriver() {
-    try {
-        const shared = getDbConfig("default"); // strictly MDB_*
-        if (shared.driver !== "sqlite") {
-            // Only a warning: you can point master at Postgres/MySQL if you prefer.
-            console.warn(
-                `[db.ts] Master DB driver is '${shared.driver}'. For quick-start dev, MDB_DRIVER=sqlite with MDB_FILE=./data/dev.sqlite is recommended.`
-            );
-        }
-    } catch {
-        // Ignore at import-time if envs not ready.
-    }
-})();
-
-// Final explicit export for API consumption
-export { mdb, db };
