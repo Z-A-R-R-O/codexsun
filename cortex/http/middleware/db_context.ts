@@ -31,8 +31,7 @@ type ReqWithCtx = IncomingMessage & {
  *   - "default"
  */
 export function dbContextMiddleware(
-    mapProfile: (req: ReqWithCtx) => Profile = (req) =>
-        ((req.headers["x-db-profile"] as string) || (req.tenant?.id as string) || "default") as Profile,
+    mapProfile: (req: ReqWithCtx) => Profile = (req) => ((req.headers["x-db-profile"] as string) || (req.tenant?.id as string) || "default") as Profile, p0: any,
 ) {
     return async function dbMw(req: ReqWithCtx, _res: ServerResponse, next: () => void | Promise<void>) {
         const profile = mapProfile(req);

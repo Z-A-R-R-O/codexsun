@@ -1,5 +1,5 @@
 // apps/user/User.model.ts
-import {Model as M} from "../../../../../cortex/core/model";
+import {Model as M} from "../../../../../../cortex/core/old/model";
 
 export class User extends M {
     public static table = "users";

@@ -14,7 +14,7 @@ import getDbConfig from "../database/getDbConfig";
 // import { tenantValidatorTests } from "../../apps/cxsun/core/tenant/test_tenant_validator";
 // import {tenantIntegrationTests} from "../../apps/cxsun/core/tenant/test_tenant_integration";
 
-import {userIntegrationTests} from "../../apps/cxsun/src/user/test/user_integration";
+import {userIntegrationTests} from "../../apps/cxsun/src/user/old/test/user_integration";
 
 async function main() {
 

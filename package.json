@@ -17,7 +17,7 @@
     "start": "node dist/server.js",
     "clean:all": "pnpm -r run --if-present clean && pnpm prune && pnpm store prune",
     "cx": "tsx cortex/cli/index.ts",
-    "tests": "tsx cortex/tests/test.ts"
+    "tests": "tsx tests/test.ts"
   },
   "engines": {
     "node": ">=18"

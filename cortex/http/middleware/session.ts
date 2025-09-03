@@ -13,13 +13,13 @@ import {
 } from "../session_data";
 
 export interface SessionOptions {
-    cookieName?: string;                 // default: "sid"
-    ttlSeconds?: number;                 // default: 2h
-    secure?: boolean;                    // default: auto (true on HTTPS / x-forwarded-proto=https)
-    sameSite?: "Lax" | "Strict" | "None";// default: "Lax"
-    domain?: string;                     // cookie domain
-    path?: string;                       // default: "/"
-    signKey?: string;                    // HMAC key; default: process.env.APP_KEY
+    cookieName?: string;
+    ttlSeconds?: number;
+    secure?: boolean;
+    sameSite?: "Lax" | "Strict" | "None";
+    domain?: string;
+    path?: string;
+    signKey?: string;
 }
 
 export interface SessionData {
@@ -96,7 +96,6 @@ export function createSessionMiddleware(opts: SessionOptions = {}) {
             all: () => ({ ...rec!.data }),
             destroy: async () => {
                 mem.delete(sid!);
-                // overwrite cookie (expire immediately)
                 const setCookie = serializeCookie(name, "", {
                     path,
                     domain: opts.domain,
@@ -109,9 +108,23 @@ export function createSessionMiddleware(opts: SessionOptions = {}) {
             },
             regenerate: async () => {
                 const newId = randId();
+                // carry over existing data
                 mem.set(newId, { data: rec!.data, exp: nowSec() + ttl });
                 mem.delete(sid!);
                 sid = newId;
+                api.id = sid; // update visible id on req.session
+
+                // immediately send a new cookie to the client
+                const signed = signCookieValue(sid, signKey);
+                const setCookie = serializeCookie(name, signed, {
+                    path,
+                    domain: opts.domain,
+                    sameSite,
+                    secure,
+                    httpOnly: true,
+                    ttlSeconds: ttl,
+                } as SessionCookieOptions);
+                setSetCookie(res, setCookie);
             },
         };
 
@@ -132,7 +145,7 @@ export function createSessionMiddleware(opts: SessionOptions = {}) {
         } as SessionCookieOptions);
         setSetCookie(res, setCookie);
 
-        await Promise.resolve(next());
+        await next();
     };
 }
 

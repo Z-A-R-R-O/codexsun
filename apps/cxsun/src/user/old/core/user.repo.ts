@@ -1,6 +1,6 @@
 // apps/cxsun/src/user/user.repo.ts
 import { User } from "./user.model";
-import { getConnection } from "../../../../../cortex/database/connection_manager";
+import { getConnection } from "../../../../../../cortex/database/connection_manager";
 
 export class UserRepo {
     private conn = getConnection("default"); // live DB connection

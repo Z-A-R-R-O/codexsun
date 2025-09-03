@@ -152,7 +152,30 @@ export async function rollback(profile: string): Promise<void> {
 
 export async function testConnection(profile: string = "default"): Promise<boolean> {
     const engine = await prepareEngine(profile);
+    if (!engine) throw new Error(`No engine for profile ${profile}`);
     return engine.testConnection();
+}
+
+export async function getConnection(profile: string): Promise<any> {
+    const engine: Engine = await prepareEngine(profile);
+    if (!engine) throw new Error(`No engine for profile ${profile}`);
+    return engine.getConnection();
+}
+
+export async function closeEngine(profile: string): Promise<void> {
+    const engine: Engine = await prepareEngine(profile);
+    if (!engine) throw new Error(`No engine for profile ${profile}`);
+    if (engine) await engine.close();
+}
+
+export async function healthz(profile: string): Promise<boolean> {
+    try {
+        const conn = await getConnection(profile);
+        await conn.query("SELECT 1"); // or engine-specific ping
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 /* ------------------------------------------------------------------------------------------------

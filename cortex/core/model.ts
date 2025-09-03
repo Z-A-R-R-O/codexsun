@@ -1,9 +1,8 @@
-// cortex/core/Model.ts
-import "reflect-metadata";
+import { GetSchema } from "./decorators";
+import { Schema } from "./schema";
 
 export abstract class Model {
     public static table: string;
-    public static _schema: any;
 
     protected _data: Record<string, any> = {};
 
@@ -22,14 +21,28 @@ export abstract class Model {
     toJSON(): Record<string, any> {
         return { ...this._data };
     }
-}
 
-// merge namespace with types
-export namespace Model {
-    export type pkType = number;
-    export type strType = string;
-    export type emailType = string & { __emailBrand: true };
-    export type hashedType = string & { __hashedBrand: true };
-    export type boolType = boolean;
-    export type tzType = Date;
+    validate(): string[] {
+        const schema: Schema = GetSchema(this.constructor);
+        return schema.validate(this._data);
+    }
+
+    async save(): Promise<this> {
+        const errors = this.validate();
+        if (errors.length > 0) {
+            throw new Error(
+                `Validation failed for ${this.constructor.name}: \n- ${errors.join("\n- ")}`
+            );
+        }
+
+        // 🚀 later: insert/update with query builder
+        console.log(`Saving ${this.constructor.name} to table "${(this.constructor as any).table}"`);
+        console.log(this.toJSON());
+
+        return this;
+    }
+
+    static get schema(): Schema {
+        return GetSchema(this);
+    }
 }

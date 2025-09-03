@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import chalk from "chalk";
-import userApi from "../core/user.api"; // adjust path if needed
+import userApi from "./user.api"; // adjust path if needed
 
 export async function userIntegrationTests() {
     const fastify = Fastify({ logger: false });

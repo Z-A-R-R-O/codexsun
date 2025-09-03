@@ -1,7 +1,7 @@
 // cortex/core/SchemaConnector.ts
-import type { Model } from "./model.js";
-import type { TableDefFn } from "../migration/Blueprint.js";
-import Builder, { defineTable } from "../migration/Builder.js";
+import type { Model } from "./model";
+import type { TableDefFn } from "../../migration/Blueprint";
+import Builder, { defineTable } from "../../migration/Builder";
 
 /**
  * Initializes schema for a Model using a TableDefFn (DSL) and a dialect Builder.

@@ -1,6 +1,6 @@
 // user.controller.ts
 import { UserService } from "./user.service";
-import { IRequest } from "../../../../../cortex/core/controller"; // type only
+import { IRequest } from "../../../../../../cortex/core/old/controller"; // type only
 
 export class UserController {
     private service: UserService;

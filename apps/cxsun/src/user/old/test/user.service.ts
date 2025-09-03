@@ -1,5 +1,5 @@
 // apps/cxsun/src/user/user.service.ts
-import { Service, ModelApi, PaginatedResult } from "../../../../../cortex/core/service";
+import { Service, ModelApi, PaginatedResult } from "../../../../../../cortex/core/old/service";
 import { User } from "./user.model";
 import { UserValidator } from "./user.validator";
 

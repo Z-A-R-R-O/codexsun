@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "noEmit": true,
-    "target": "ES2022",
+    "target": "ESNext",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,

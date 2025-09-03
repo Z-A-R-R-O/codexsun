@@ -7,7 +7,7 @@ import {
     hashedType,
     makeEmail,
     hashPassword,
-} from "../../../../../cortex/core/IValidator";
+} from "../../../../../../cortex/core/old/IValidator";
 
 export interface UserCreateInput {
     name: strType;

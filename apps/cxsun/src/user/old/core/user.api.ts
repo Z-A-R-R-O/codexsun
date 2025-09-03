@@ -1,7 +1,7 @@
 import { FastifyPluginCallback, FastifyRequest } from "fastify";
 import { UserController } from "./user.controller";
-import { aRequest } from "../../../../../cortex/core/controller";
-import { IRequest } from "../../../../../cortex/core/controller";
+import { aRequest } from "../../../../../../cortex/core/old/controller";
+import { IRequest } from "../../../../../../cortex/core/old/controller";
 
 const registerUserApi: FastifyPluginCallback<{ prefix?: string }> = (app, _opts, done) => {
     const ctrl = new UserController();
