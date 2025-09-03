@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Request, Response } from "express";
 import * as TenantRepoMod from "../code/tenant.repo";
 import TenantController from "../code/tenant.controller";
-import { logger } from "../../../../../cortex/utils/logger";
+import { logger } from "../../../../../cortex/log/logger";
 
 // Minimal Response mock
 function mockRes() {

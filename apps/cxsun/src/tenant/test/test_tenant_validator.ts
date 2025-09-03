@@ -1,7 +1,7 @@
 // cortex/tests/test_tenant_validator.ts
 import assert from "node:assert/strict";
 import { TenantCreateSchema, TenantUpdateSchema } from "../code/tenant.validator";
-import { logger } from "../../../../../cortex/utils/logger";
+import { logger } from "../../../../../cortex/log/logger";
 
 export async function tenantValidatorTests() {
     logger.info("▶ TenantValidator: starting tests");
