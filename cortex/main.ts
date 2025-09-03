@@ -1,8 +1,9 @@
 // cortex/main.ts — safe, configurable app loader (ESM)
+
 import { existsSync, readdirSync } from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
-import type { RouteRegistry } from "./http/route_registry"; // adjust if your path differs
+import type { RouteRegistery } from "./http/route_registery"; // adjust if your path differs
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,7 +24,7 @@ function candidateDirs(): string[] {
     ];
 }
 
-export async function registerApps(registry: RouteRegistry) {
+export async function registerApps(registry: RouteRegistery) {
     const dirs = candidateDirs();
     let registered = 0;
 

@@ -1,309 +1,388 @@
-// sftpx.ts
-/**
- * sftpx — minimal SFTP server over SSH using `ssh2`
- * - Barebones implementation mapping to a local directory (`rootDir`).
- * - Supports password auth (and optional public key auth).
- * - Implements common SFTP ops: REALPATH, STAT/LSTAT, OPENDIR/READDIR, OPEN/READ/WRITE/CLOSE,
- *   MKDIR, RMDIR, REMOVE, RENAME.
- *
- * NOTE: Requires `ssh2` and `@types/ssh2` in your project.
- *       This is intentionally simple; harden before production (chrooting, per-user roots, quotas, etc.).
- */
+// cortex/framework/sftpx.ts
+// Lightweight SFTP server wrapper (optional). Uses `ssh2` if available.
+// Exports `createSftpServer({ rootDir, hostKeyPath, users })` which returns an object with `.listen(port, host, cb)`.
+//
+// Notes:
+// - Auth: either password or public key (OpenSSH format). Provide per-user via `users`.
+// - Filesystem: jailed to `rootDir` (path escaping is blocked).
+// - If `ssh2` is not installed, a no-op stub is returned so your app won’t crash.
 
-import fs from 'fs';
-import fsp from 'fs/promises';
-import path from 'path';
-import ssh2 from 'ssh2';
+import fs from "fs";
+import path from "path";
 
-const { Server: SSHServer } = ssh2 as unknown as { Server: new (...args: any[]) => any };
-
-export interface SftpAuthUser {
-  username: string;
-  password?: string;
-  // OpenSSH-format public key string(s) allowed for this user (optional)
-  authorizedKeys?: string[];
-}
+export type SftpUser = {
+    username: string;
+    password?: string;
+    authorizedKeys?: string[]; // OpenSSH public keys
+};
 
 export interface SftpOptions {
-  hostKeys: Buffer[];         // e.g., [fs.readFileSync('ssh_host_ed25519_key')]
-  users: SftpAuthUser[];      // static user list (simple)
-  rootDir: string;            // filesystem root for SFTP (sandbox)
-  banner?: string;
-  debug?: boolean;
-  onError?: (e: any) => void;
+    rootDir: string;
+    hostKeyPath?: string; // required if ssh2 present
+    users?: SftpUser[];
 }
 
-type HandleEntry =
-  | { kind: 'file'; fd: number }
-  | { kind: 'dir'; dir: fs.Dir };
+type ListenCb = () => void;
 
-function ok(stream: any, reqid: number) {
-  stream.status(reqid, stream.STATUS_CODE.OK);
-}
-function fail(stream: any, reqid: number, code?: number) {
-  stream.status(reqid, code ?? stream.STATUS_CODE.FAILURE);
+function safeJoin(root: string, p: string) {
+    const norm = path.resolve(root, p.replace(/^\/+/, ""));
+    const rootAbs = path.resolve(root);
+    if (!norm.startsWith(rootAbs)) {
+        throw Object.assign(new Error("Path escapes root"), { code: "EPERM" });
+    }
+    return norm;
 }
 
-function sanitize(root: string, p: string) {
-  const resolved = path.resolve(root, '.' + (p.startsWith('/') ? p : '/' + p));
-  if (!resolved.startsWith(path.resolve(root))) {
-    throw Object.assign(new Error('Path escape'), { code: 'EPERM' });
-  }
-  return resolved;
+function fileAttrsFromStat(st: fs.Stats) {
+    // See ssh2-streams attrs: size, uid, gid, mode, atime, mtime
+    return {
+        mode: st.mode,
+        uid: (st as any).uid ?? 0,
+        gid: (st as any).gid ?? 0,
+        size: Number(st.size),
+        atime: Math.floor(st.atimeMs / 1000) || Math.floor(st.atime.getTime() / 1000),
+        mtime: Math.floor(st.mtimeMs / 1000) || Math.floor(st.mtime.getTime() / 1000),
+    };
+}
+
+function loadHostKey(hostKeyPath?: string): Buffer | null {
+    if (!hostKeyPath) return null;
+    const p = path.resolve(hostKeyPath);
+    if (!fs.existsSync(p)) throw new Error(`SFTP host key not found at ${p}`);
+    return fs.readFileSync(p);
+}
+
+function parseAuthorizedKeys(keys?: string[]): any[] {
+    // Lazy parse at runtime if ssh2 present
+    return keys?.filter(Boolean) ?? [];
 }
 
 export function createSftpServer(opts: SftpOptions) {
-  const { hostKeys, users, rootDir, banner, debug, onError } = opts;
-    return new SSHServer({hostKeys, banner}, (client: any) => {
-      if (debug) console.log('[sftp] client connected');
+    let SSH2: any = null;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        SSH2 = require("ssh2");
+    } catch {
+        SSH2 = null;
+    }
 
-      client.on('authentication', (ctx: any) => {
-          const user = users.find(u => u.username === ctx.username);
-          if (!user) return ctx.reject();
-          if (ctx.method === 'password' && user.password && ctx.password === user.password) return ctx.accept();
-          if (ctx.method === 'publickey' && user.authorizedKeys?.length) {
-              const pubKey = ctx.key.data.toString('base64');
-              const match = user.authorizedKeys.some(k => k.includes(pubKey));
-              if (match) return ctx.accept();
-          }
-          ctx.reject();
-      });
+    const rootDir = path.resolve(opts.rootDir || path.resolve(process.cwd(), "storage", "sftp"));
+    fs.mkdirSync(rootDir, { recursive: true });
 
-      client.on('ready', () => {
-          if (debug) console.log('[sftp] client auth ok');
-          client.on('session', (accept: any) => {
-              const session = accept();
-              session.on('sftp', (acceptSftp: any) => {
-                  const sftp = acceptSftp();
-                  const handles = new Map<string, HandleEntry>();
-                  let handleCounter = 1;
+    if (!SSH2) {
+        // Graceful stub: does nothing but logs a warning
+        return {
+            listen(_port: number, _host?: string, cb?: ListenCb) {
+                console.warn("[SFTP] ssh2 module not installed — SFTP server disabled");
+                cb && cb();
+                return {
+                    close() {/* noop */},
+                };
+            },
+        };
+    }
 
-                  function makeHandle(entry: HandleEntry) {
-                      const buff = Buffer.alloc(4);
-                      buff.writeUInt32BE(handleCounter++, 0);
-                      handles.set(buff.toString('hex'), entry);
-                      return buff;
-                  }
+    const hostKey = loadHostKey(opts.hostKeyPath);
+    const users = (opts.users || []).map((u) => ({
+        username: u.username,
+        password: u.password,
+        authorizedKeys: parseAuthorizedKeys(u.authorizedKeys),
+    }));
 
-                  function getHandle(handle: Buffer) {
-                      const key = handle.toString('hex');
-                      return handles.get(key);
-                  }
+    const server = new SSH2.Server(
+        { hostKeys: hostKey ? [hostKey] : undefined },
+        (client: any) => {
+            let authedUser: SftpUser | null = null;
 
-                  sftp.on('REALPATH', (reqid: number, givenPath: string) => {
-                      try {
-                          const abs = sanitize(rootDir, givenPath || '/');
-                          const rel = path.posix.normalize('/' + path.relative(rootDir, abs).split(path.sep).join('/'));
-                          sftp.name(reqid, [{filename: rel, longname: rel, attrs: {}}]);
-                      } catch {
-                          fail(sftp, reqid);
-                      }
-                  });
+            client.on("authentication", (ctx: any) => {
+                const u = users.find((x) => x.username === ctx.username);
 
-                  sftp.on('STAT', async (reqid: number, p: string) => {
-                      try {
-                          const st = await fsp.stat(sanitize(rootDir, p));
-                          sftp.attrs(reqid, statsToAttrs(st));
-                      } catch {
-                          fail(sftp, reqid, sftp.STATUS_CODE.NO_SUCH_FILE);
-                      }
-                  });
-                  sftp.on('LSTAT', async (reqid: number, p: string) => {
-                      try {
-                          const st = await fsp.lstat(sanitize(rootDir, p));
-                          sftp.attrs(reqid, statsToAttrs(st));
-                      } catch {
-                          fail(sftp, reqid, sftp.STATUS_CODE.NO_SUCH_FILE);
-                      }
-                  });
+                // No user configured -> reject
+                if (!u) return ctx.reject();
 
-                  sftp.on('OPENDIR', async (reqid: number, p: string) => {
-                      try {
-                          const dir = await fsp.opendir(sanitize(rootDir, p));
-                          const h = makeHandle({kind: 'dir', dir: dir as unknown as fs.Dir});
-                          sftp.handle(reqid, h);
-                      } catch {
-                          fail(sftp, reqid);
-                      }
-                  });
+                // password
+                if (ctx.method === "password" && u.password) {
+                    if (ctx.password === u.password) {
+                        authedUser = u;
+                        return ctx.accept();
+                    }
+                    return ctx.reject();
+                }
 
-                  sftp.on('READDIR', async (reqid: number, handle: Buffer) => {
-                      const entry = getHandle(handle);
-                      if (!entry || entry.kind !== 'dir') return fail(sftp, reqid);
-                      const dir = entry.dir;
-                      try {
-                          const batch: any[] = [];
-                          for await (const dirent of dir) {
-                              const full = path.join(dir.path, dirent.name);
-                              let st;
-                              try {
-                                  st = await fsp.lstat(full);
-                              } catch {
-                                  continue;
-                              }
-                              batch.push({
-                                  filename: dirent.name,
-                                  longname: dirent.name,
-                                  attrs: statsToAttrs(st)
-                              });
-                              if (batch.length >= 64) {
-                                  sftp.name(reqid, batch);
-                                  return;
-                              }
-                          }
-                          // EOF
-                          sftp.status(reqid, sftp.STATUS_CODE.EOF);
-                      } catch {
-                          fail(sftp, reqid);
-                      }
-                  });
+                // publickey
+                if (ctx.method === "publickey" && Array.isArray(u.authorizedKeys) && u.authorizedKeys.length) {
+                    try {
+                        const { utils } = SSH2;
+                        const match = u.authorizedKeys.some((keyStr: string) => {
+                            try {
+                                const parsed = utils.parseKey(keyStr.trim());
+                                // ctx.key.algo && ctx.key.data are provided
+                                return (
+                                    parsed &&
+                                    parsed.type === ctx.key.algo &&
+                                    parsed.getPublicSSH() &&
+                                    Buffer.isBuffer(ctx.key.data) &&
+                                    Buffer.compare(parsed.getPublicSSH(), ctx.key.data) === 0
+                                );
+                            } catch {
+                                return false;
+                            }
+                        });
+                        if (match) {
+                            authedUser = u;
+                            return ctx.accept();
+                        }
+                    } catch (e) {
+                        // fallthrough
+                    }
+                    return ctx.reject();
+                }
 
-                  sftp.on('OPEN', async (reqid: number, p: string, flags: number, attrs: any) => {
-                      void attrs;
-                      try {
-                          const fp = sanitize(rootDir, p);
-                          const fd = await fsp.open(fp, flagsToFs(flags), 0o644);
-                          const h = makeHandle({kind: 'file', fd: (fd as any).fd});
-                          sftp.handle(reqid, h);
-                      } catch (e: any) {
-                          fail(sftp, reqid);
-                      }
-                  });
+                // If user has no creds configured, reject
+                return ctx.reject();
+            });
 
-                  sftp.on('WRITE', (reqid: number, handle: Buffer, offset: number, data: Buffer) => {
-                      const entry = getHandle(handle);
-                      if (!entry || entry.kind !== 'file') return fail(sftp, reqid);
-                      fs.write(entry.fd, data, 0, data.length, offset, (err) => {
-                          if (err) return fail(sftp, reqid);
-                          ok(sftp, reqid);
-                      });
-                  });
+            client.on("ready", () => {
+                client.on("session", (accept: any, _reject: any) => {
+                    const session = accept();
+                    session.on("sftp", (acceptSftp: any, _rejectSftp: any) => {
+                        const sftp = acceptSftp();
 
-                  sftp.on('READ', (reqid: number, handle: Buffer, offset: number, length: number) => {
-                      const entry = getHandle(handle);
-                      if (!entry || entry.kind !== 'file') return fail(sftp, reqid);
-                      const buf = Buffer.alloc(length);
-                      fs.read(entry.fd, buf, 0, length, offset, (err, bytesRead) => {
-                          if (err) return fail(sftp, reqid);
-                          sftp.data(reqid, buf.subarray(0, bytesRead)); // <- preferred
-                      });
-                  });
+                        // handle registry
+                        const fds = new Map<number, number>(); // handleId -> fd
+                        const dds = new Map<number, fs.Dir>(); // handleId -> Dir
+                        let nextHandle = 1;
 
-                  sftp.on('CLOSE', (reqid: number, handle: Buffer) => {
-                      const entry = getHandle(handle);
-                      if (!entry) return fail(sftp, reqid);
-                      if (entry.kind === 'file') {
-                          fs.close(entry.fd, (err) => {
-                              handles.delete(handle.toString('hex'));
-                              if (err) return fail(sftp, reqid);
-                              ok(sftp, reqid);
-                          });
-                      } else {
-                          entry.dir.close().then(
-                              () => {
-                                  handles.delete(handle.toString('hex'));
-                                  ok(sftp, reqid);
-                              },
-                              () => fail(sftp, reqid)
-                          );
-                      }
-                  });
+                        const makeHandle = () => {
+                            const id = nextHandle++;
+                            const buf = Buffer.alloc(4);
+                            buf.writeUInt32BE(id, 0);
+                            return { id, buf };
+                        };
 
-                  sftp.on('MKDIR', async (reqid: number, p: string, _attrs: any) => {
-                        void _attrs;
-                      try {
-                          await fsp.mkdir(sanitize(rootDir, p), {recursive: false});
-                          ok(sftp, reqid);
-                      } catch {
-                          fail(sftp, reqid);
-                      }
-                  });
-                  sftp.on('RMDIR', async (reqid: number, p: string) => {
-                      try {
-                          await fsp.rmdir(sanitize(rootDir, p));
-                          ok(sftp, reqid);
-                      } catch {
-                          fail(sftp, reqid);
-                      }
-                  });
-                  sftp.on('REMOVE', async (reqid: number, p: string) => {
-                      try {
-                          await fsp.unlink(sanitize(rootDir, p));
-                          ok(sftp, reqid);
-                      } catch {
-                          fail(sftp, reqid);
-                      }
-                  });
-                  sftp.on('RENAME', async (reqid: number, oldP: string, newP: string) => {
-                      try {
-                          await fsp.rename(sanitize(rootDir, oldP), sanitize(rootDir, newP));
-                          ok(sftp, reqid);
-                      } catch {
-                          fail(sftp, reqid);
-                      }
-                  });
+                        sftp.on("REALPATH", (reqid: number, givenPath: string) => {
+                            try {
+                                const abs = safeJoin(rootDir, givenPath || ".");
+                                const rel = "/" + path.relative(rootDir, abs).replace(/\\/g, "/");
+                                sftp.name(reqid, [{ filename: rel || "/", longname: rel, attrs: {} }]);
+                            } catch (e) {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
 
-                  sftp.on('END', () => {
-                      for (const [k, v] of handles) {
-                          if (v.kind === 'file') try {
-                              fs.closeSync(v.fd);
-                          } catch {
-                          }
-                          if (v.kind === 'dir') try {
-                              (v.dir as any).closeSync?.();
-                          } catch {
-                          }
-                          handles.delete(k);
-                      }
-                      if (debug) console.log('[sftp] stream ended');
-                  });
-              });
-          });
-      });
+                        sftp.on("STAT", (reqid: number, p: string) => {
+                            try {
+                                const abs = safeJoin(rootDir, p);
+                                const st = fs.statSync(abs);
+                                sftp.attrs(reqid, fileAttrsFromStat(st));
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.NO_SUCH_FILE);
+                            }
+                        });
 
-      client.on('error', (e: any) => onError?.(e));
-      client.on('end', () => {
-          if (debug) console.log('[sftp] client disconnected');
-      });
-  });
-}
+                        sftp.on("LSTAT", (reqid: number, p: string) => {
+                            try {
+                                const abs = safeJoin(rootDir, p);
+                                const st = fs.lstatSync(abs);
+                                sftp.attrs(reqid, fileAttrsFromStat(st));
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.NO_SUCH_FILE);
+                            }
+                        });
 
-function statsToAttrs(st: fs.Stats) {
-  // ssh2 expects { mode, uid, gid, size, atime, mtime }
-  return {
-    mode: st.mode,
-    uid: (st as any).uid ?? 0,
-    gid: (st as any).gid ?? 0,
-    size: st.size,
-    atime: Math.floor(st.atimeMs / 1000),
-    mtime: Math.floor(st.mtimeMs / 1000)
-  };
-}
+                        sftp.on("FSTAT", (reqid: number, handle: Buffer) => {
+                            const id = handle.readUInt32BE(0);
+                            const fd = fds.get(id);
+                            if (!fd) return sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            try {
+                                const st = fs.fstatSync(fd);
+                                sftp.attrs(reqid, fileAttrsFromStat(st));
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
 
-function flagsToFs(flags: number) {
-  // ssh2 uses POSIX-like flags.
-  const SSH_FXF_READ = 0x01;
-  const SSH_FXF_WRITE = 0x02;
-  const SSH_FXF_CREAT = 0x08;
-  const SSH_FXF_TRUNC = 0x20;
-  const SSH_FXF_APPEND = 0x04;
+                        sftp.on("OPENDIR", (reqid: number, p: string) => {
+                            try {
+                                const abs = safeJoin(rootDir, p);
+                                const dir = fs.opendirSync(abs);
+                                const h = makeHandle();
+                                dds.set(h.id, dir);
+                                sftp.handle(reqid, h.buf);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
 
-  const canRead = (flags & SSH_FXF_READ) !== 0;
-  const canWrite = (flags & SSH_FXF_WRITE) !== 0;
-  const create = (flags & SSH_FXF_CREAT) !== 0;
-  const trunc = (flags & SSH_FXF_TRUNC) !== 0;
-  const append = (flags & SSH_FXF_APPEND) !== 0;
+                        sftp.on("READDIR", (reqid: number, handle: Buffer) => {
+                            const id = handle.readUInt32BE(0);
+                            const dir = dds.get(id);
+                            if (!dir) return sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
 
-  if (append) return 'a+';
-  if (canRead && canWrite) {
-    if (create && trunc) return 'w+';
-    if (create) return 'a+';
-    return 'r+';
-  }
-  if (canWrite) {
-    if (create && trunc) return 'w';
-    if (create) return 'a';
-    return 'r+';
-  }
-  return 'r';
+                            try {
+                                const entries: any[] = [];
+                                for (let i = 0; i < 64; i++) {
+                                    const dirent = dir.readSync();
+                                    if (!dirent) break;
+                                    const full = path.join(dir.path, dirent.name);
+                                    let st: fs.Stats | null = null;
+                                    try { st = fs.lstatSync(full); } catch { st = null; }
+                                    entries.push({
+                                        filename: dirent.name,
+                                        longname: dirent.name,
+                                        attrs: st ? fileAttrsFromStat(st) : {},
+                                    });
+                                }
+                                if (entries.length) {
+                                    sftp.name(reqid, entries);
+                                } else {
+                                    // end of directory
+                                    dir.closeSync();
+                                    dds.delete(id);
+                                    sftp.status(reqid, SSH2.SFTP_STATUS_CODE.EOF);
+                                }
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("CLOSE", (reqid: number, handle: Buffer) => {
+                            const id = handle.readUInt32BE(0);
+                            const fd = fds.get(id);
+                            const dir = dds.get(id);
+                            try {
+                                if (fd != null) {
+                                    fs.closeSync(fd);
+                                    fds.delete(id);
+                                }
+                                if (dir) {
+                                    dir.closeSync();
+                                    dds.delete(id);
+                                }
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.OK);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("OPEN", (reqid: number, p: string, flags: number, _attrs: any) => {
+                            try {
+                                const abs = safeJoin(rootDir, p);
+                                // Convert SFTP flags to fs flags
+                                // Basic mapping; adjust as needed
+                                const O_RDONLY = 0x00; const O_WRONLY = 0x01; const O_RDWR = 0x02;
+                                const O_CREAT = 0x040; const O_TRUNC = 0x200; const O_EXCL = 0x080;
+                                let fsFlags = 0;
+                                if (flags & O_RDWR) fsFlags = fsFlags | fs.constants.O_RDWR;
+                                else if (flags & O_WRONLY) fsFlags = fsFlags | fs.constants.O_WRONLY;
+                                else fsFlags = fsFlags | fs.constants.O_RDONLY;
+                                if (flags & O_CREAT) fsFlags = fsFlags | fs.constants.O_CREAT;
+                                if (flags & O_TRUNC) fsFlags = fsFlags | fs.constants.O_TRUNC;
+                                if (flags & O_EXCL) fsFlags = fsFlags | fs.constants.O_EXCL;
+
+                                const fd = fs.openSync(abs, fsFlags, 0o644);
+                                const h = makeHandle();
+                                fds.set(h.id, fd);
+                                sftp.handle(reqid, h.buf);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("READ", (reqid: number, handle: Buffer, offset: number, length: number) => {
+                            const id = handle.readUInt32BE(0);
+                            const fd = fds.get(id);
+                            if (fd == null) return sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            try {
+                                const buf = Buffer.allocUnsafe(length);
+                                const bytesRead = fs.readSync(fd, buf, 0, length, offset);
+                                if (bytesRead > 0) {
+                                    sftp.data(reqid, buf.subarray(0, bytesRead));
+                                } else {
+                                    sftp.status(reqid, SSH2.SFTP_STATUS_CODE.EOF);
+                                }
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("WRITE", (reqid: number, handle: Buffer, offset: number, data: Buffer) => {
+                            const id = handle.readUInt32BE(0);
+                            const fd = fds.get(id);
+                            if (fd == null) return sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            try {
+                                fs.writeSync(fd, data, 0, data.length, offset);
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.OK);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("REMOVE", (reqid: number, p: string) => {
+                            try {
+                                const abs = safeJoin(rootDir, p);
+                                fs.unlinkSync(abs);
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.OK);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("RMDIR", (reqid: number, p: string) => {
+                            try {
+                                const abs = safeJoin(rootDir, p);
+                                fs.rmdirSync(abs);
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.OK);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("MKDIR", (reqid: number, p: string, attrs: any) => {
+                            try {
+                                const abs = safeJoin(rootDir, p);
+                                const mode = attrs?.mode ?? 0o755;
+                                fs.mkdirSync(abs, { recursive: false, mode });
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.OK);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        sftp.on("RENAME", (reqid: number, oldPath: string, newPath: string) => {
+                            try {
+                                const a = safeJoin(rootDir, oldPath);
+                                const b = safeJoin(rootDir, newPath);
+                                fs.renameSync(a, b);
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.OK);
+                            } catch {
+                                sftp.status(reqid, SSH2.SFTP_STATUS_CODE.FAILURE);
+                            }
+                        });
+
+                        // Catch-alls for unimplemented ops
+                        const notImpl = (name: string) => (reqid: number) => {
+                            // You can add more as needed: SETSTAT, FSETSTAT, READLINK, SYMLINK, etc.
+                            sftp.status(reqid, SSH2.SFTP_STATUS_CODE.OP_UNSUPPORTED);
+                        };
+                        sftp.on("SETSTAT", notImpl("SETSTAT"));
+                        sftp.on("FSETSTAT", notImpl("FSETSTAT"));
+                        sftp.on("READLINK", notImpl("READLINK"));
+                        sftp.on("SYMLINK", notImpl("SYMLINK"));
+                    });
+                });
+            });
+
+            client.on("end", () => { /* client disconnected */ });
+            client.on("error", () => { /* swallow per-connection errors */ });
+        },
+    );
+
+    return {
+        listen(port: number, host?: string, cb?: ListenCb) {
+            const h = host || "0.0.0.0";
+            server.listen(port, h, cb);
+            return server;
+        },
+    };
 }

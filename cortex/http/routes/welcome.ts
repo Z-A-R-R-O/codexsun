@@ -1,106 +1,68 @@
-import { IncomingMessage, ServerResponse } from "http";
+// cortex/http/routes/welcome.ts
 
-/**
- * Minimal '/' route that returns HTML (browser-friendly).
- * Assumes upstream middleware may have attached: ctx.session, ctx.tenant, ctx.db.
- */
+import type { RouteDef } from "../chttpx";
 
-export interface SessionAPI {
-    id: string;
-    get<T = unknown>(key: string): Promise<T | undefined>;
-    set(key: string, value: unknown): Promise<void>;
-    all<T = Record<string, unknown>>(): Promise<T>;
-    destroy(): Promise<void>;
-    regenerate(opts?: { keepData?: boolean }): Promise<void>;
-}
+export function routes(): RouteDef[] {
+    return [
+        {
+            method: "GET",
+            path: "/",
+            handler: async (req, res) => {
+                const app = process.env.APP_NAME || "Codexsun";
+                const ver = process.env.APP_VERSION || "";
+                const sid = (req as any).session?.id || "—";
+                const tenantId = (req as any).tenant?.id || "—";
 
-export interface DBHandle {
-    profile: string;
-    driver(): Promise<string>;
-    healthz(): Promise<{ ok: boolean; driver: string }>; // lightweight ping
-}
-
-export interface TenantLike { id: string | number; code?: string; name?: string }
-
-export interface CtxLike {
-    req: IncomingMessage & { [k: string]: any };
-    res: ServerResponse & { [k: string]: any };
-    session?: SessionAPI;
-    tenant?: TenantLike | null;
-    db?: DBHandle;
-}
-
-const esc = (s: unknown) => String(s ?? "").replace(/[&<>\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]!));
-
-export async function welcome(ctx: string) {
-    const { res, session, tenant, db } = ctx;
-    const app = process.env.APP_NAME || "CodexSun";
-    const ver = process.env.APP_VERSION || "0.0.0";
-
-    let driver = "(none)";
-    let profile = "(none)";
-    try {
-        if (db) {
-            driver = await db.driver();
-            profile = db.profile;
-        }
-    } catch { /* ignore */ }
-
-    const html = `<!doctype html>
+                const html = `<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${esc(app)} — Welcome</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; margin: 0; }
-    header { padding: 28px 20px; background: #0ea5e9; color: white; }
-    main { padding: 20px; max-width: 860px; margin: 0 auto; }
-    .card { border: 1px solid rgba(0,0,0,.08); border-radius: 12px; padding: 16px; margin: 12px 0; }
-    .k { color: #6b7280; min-width: 160px; display: inline-block; }
-    code { background: rgba(0,0,0,.06); padding: 2px 6px; border-radius: 6px; }
-    footer { color: #6b7280; padding: 20px; text-align: center; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>${app} — Welcome</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#677; --bg:#fff; --card:#f7f7f8; --accent:#4f46e5; }
+  * { box-sizing:border-box }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color:var(--fg); background:var(--bg); }
+  .wrap { max-width: 880px; margin: 5vh auto; padding: 24px; }
+  .card { background:var(--card); border-radius:16px; padding:24px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  h1 { margin:0 0 8px; font-size: clamp(24px, 4vw, 34px); }
+  p { margin: 8px 0 0; color: var(--muted); }
+  .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:16px; }
+  .kpi { background:#fff; padding:14px 16px; border-radius:12px; border:1px solid #eee; }
+  .kpi b { display:block; font-size:12px; color:#6b7280; text-transform:uppercase; letter-spacing:.06em; }
+  .kpi span { display:block; font-size:14px; margin-top:4px; color:#111827; word-break:break-all; }
+  code { background:#111827; color:#e5e7eb; padding:2px 6px; border-radius:6px; }
+  a { color:var(--accent); text-decoration:none; }
+  .links { margin-top:18px; display:flex; gap:12px; flex-wrap:wrap; }
+  .pill { display:inline-block; padding:8px 12px; background:#fff; border:1px solid #eee; border-radius:999px; }
+</style>
 </head>
 <body>
-<header>
-  <h1>${esc(app)}</h1>
-  <p>Version ${esc(ver)}</p>
-</header>
-<main>
-  <div class="card">
-    <h2>It works 🎉</h2>
-    <p>Your server is up. Use this page for a quick sanity check.</p>
+  <div class="wrap">
+    <div class="card">
+      <h1>Welcome to Codexsun 👋</h1>
+      <p>${app}${ver ? ` v${ver}` : ""} is running.</p>
+
+      <div class="grid">
+        <div class="kpi"><b>Health</b><span>GET <code>/healthz</code></span></div>
+        <div class="kpi"><b>Session</b><span>${sid}</span></div>
+        <div class="kpi"><b>Tenant</b><span>${tenantId}</span></div>
+      </div>
+
+      <div class="links">
+        <span class="pill">Send <code>X-App-Key</code> / <code>X-App-Secret</code> headers to set tenant</span>
+        <span class="pill">Cookie <code>sid</code> is HttpOnly; SameSite=Lax</span>
+        <a class="pill" href="/healthz">Open /healthz</a>
+      </div>
+    </div>
   </div>
-  <div class="card">
-    <h3>Request context</h3>
-    <p><span class="k">Session ID:</span> <code>${esc(session?.id || "(no session)")}</code></p>
-    <p><span class="k">Tenant ID:</span> <code>${esc(tenant?.id ?? "(unbound)")}</code></p>
-    <p><span class="k">Tenant Code:</span> <code>${esc(tenant?.code ?? "-")}</code></p>
-  </div>
-  <div class="card">
-    <h3>Database</h3>
-    <p><span class="k">Driver:</span> <code>${esc(driver)}</code></p>
-    <p><span class="k">Profile:</span> <code>${esc(profile)}</code></p>
-  </div>
-  <div class="card">
-    <h3>Endpoints</h3>
-    <ul>
-      <li><a href="/healthz">/healthz</a> — JSON health check</li>
-    </ul>
-  </div>
-</main>
-<footer>
-  <small>© ${new Date().getFullYear()} ${esc(app)}</small>
-</footer>
 </body>
 </html>`;
 
-    res.statusCode = 200;
-    res.setHeader("content-type", "text/html; charset=utf-8");
-    res.setHeader("cache-control", "no-store");
-    res.end(html);
+                res.statusCode = 200;
+                res.setHeader("Content-Type", "text/html; charset=utf-8");
+                res.end(html);
+            },
+        },
+    ];
 }
-
-export default welcome;
