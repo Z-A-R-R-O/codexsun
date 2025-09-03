@@ -1,123 +1,74 @@
-// server.ts — bare Node entry with env, CLI, and structured logger
+// server.ts — minimal entry: env config, registry, base routes, boot with logger
 import "dotenv/config";
 import { RouteRegistry } from "./cortex/http/route_registry";
-import { bootAllFromRegistry, type BootOptions } from "./cortex/http/serve_all";
+import { bootAllFromRegistry } from "./cortex/http/serve_all";
+import { registerApps } from "./cortex/main";
+import { makeWelcomeRoute, makeHealthRoute } from "./cortex/http/chttpx";
+import { createConsoleJsonLogger } from "./cortex/http/logger";
+// Optional DB log sink (keep if you already have it)
+import { createDbLogStore } from "./cortex/http/log_store"; // or comment out if not using
 
-// Prefer local main; fall back to cortex/main if needed
-async function loadRegisterApps() {
-    try {
-        const { registerApps } = await import("./cortex/main");
-        return registerApps;
-    } catch {
-        const legacy = await import("./cortex/main");
-        if (typeof (legacy as any).registerApps === "function") {
-            return (legacy as any).registerApps;
-        }
-        throw new Error("registerApps not found in ./main or ./cortex/main");
-    }
+function int(v: string | undefined, def: number) {
+    const n = v ? parseInt(v, 10) : NaN;
+    return Number.isFinite(n) ? n : def;
 }
-
-const envBool = (v?: string, def = false) => (v === undefined ? def : /^(1|true|yes|on)$/i.test(v));
-const envInt  = (v?: string, def = 0) => { const n = v ? parseInt(v, 10) : NaN; return Number.isFinite(n) ? n : def; };
-
-// Optional project logger (cortex/utils/server-logger)
-async function getLogger() {
-    try {
-        const mod: any = await import("./cortex/utils/server-logger");
-        const Logger = mod.ServerLogger ?? class { info=console.log; warn=console.warn; error=console.error; debug=console.debug; };
-        const inst = new Logger();
-        const format = mod.formatServerLog as ((...a: any[]) => string) | undefined;
-        return { log: inst, format };
-    } catch {
-        return { log: console as any, format: undefined };
-    }
-}
-
-async function startCli(registry: RouteRegistry) {
-    try {
-        const { runCli } = await import("./cortex/cli/index");
-        process.stdin.setEncoding("utf8");
-        console.log("💻 CLI ready. Type `help`.");
-        process.stdin.on("data", async (chunk: string) => {
-            const input = String(chunk).trim();
-            if (!input) return;
-            const args = input.split(/\s+/);
-            try { await runCli(args, registry); } catch (err) { console.error("CLI error:", err); }
-        });
-    } catch {
-        // CLI optional
-    }
+function bool(v: string | undefined, def = false) {
+    if (v == null) return def;
+    return /^(1|true|yes|on)$/i.test(v);
 }
 
 async function main() {
-    const { log, format } = await getLogger();
-    const registerApps = await loadRegisterApps();
+    const HOST = process.env.APP_HOST || process.env.HOST || "localhost";
+    const PORT = int(process.env.APP_PORT || process.env.PORT, 3006);
 
-    // Host/ports
-    const host = process.env.HOST || "localhost";
-    const port = envInt(process.env.PORT, 3000);
-    const httpPort   = envInt(process.env.HTTP_PORT || String(port), port);
-    const httpsPort  = envInt(process.env.HTTPS_PORT, 3443);
-    const enableSftp = envBool(process.env.SFTP_ENABLE, true);
+    const registry = new RouteRegistry();
 
-    // Build BootOptions with logger
-    const opts: Omit<BootOptions, "providers"> = {
-        httpPort,
-        httpsPort,
-        tlsKeyPath: process.env.TLS_KEY  || "server.key",
+    // base routes so backend is visible without a frontend
+    registry.addRoutes([
+        makeWelcomeRoute(process.env.APP_NAME || "CodexSun"),
+        makeHealthRoute("/healthz"),
+    ]);
+
+    // app routes
+    await registerApps(registry);
+
+    // logger (console JSON) + optional DB log store
+    const logger = createConsoleJsonLogger();
+    const logStore = createDbLogStore?.(); // if you have it; else remove
+
+    await bootAllFromRegistry(registry, {
+        host: HOST,
+        httpPort: PORT,
+        httpsPort: int(process.env.HTTPS_PORT, 3443),
+        tlsKeyPath: process.env.TLS_KEY || "server.key",
         tlsCertPath: process.env.TLS_CERT || "server.crt",
-        tlsCaPath:   process.env.TLS_CA,
-        cors: true, // use ENV from cors.ts by default; true = permissive fallback
+        tlsCaPath: process.env.TLS_CA,
+        cors: process.env.CORS?.toLowerCase() === "off" || process.env.CORS_DISABLE === "1" ? false : true,
         sftp: {
-            enable: enableSftp,
-            port: envInt(process.env.SFTP_PORT, 2022),
+            enable: bool(process.env.SFTP_ENABLE, true),
+            port: int(process.env.SFTP_PORT, 2022),
             hostKeyPath: process.env.SSH_HOST_KEY || "ssh_host_ed25519_key",
             rootDir: process.env.SFTP_ROOT || "sftp-root",
             users: [{ username: process.env.SFTP_USER || "demo", password: process.env.SFTP_PASS || "demo" }],
         },
-        logger: {
-            access: (r) => {
-                const size = r.bytes < 1024 ? `${r.bytes}B` : `${(r.bytes / 1024).toFixed(1)}KB`;
-                const line = `[access] ${r.status} ${r.method} ${r.path} ${r.duration_ms}ms ${size} id=${r.request_id} ip=${r.ip ?? "-"}`;
-                if (format) {
-                    // If your formatter expects objects, adapt here
-                    log.info?.(format("access", line));
-                } else {
-                    log.info?.(line);
-                }
-            },
-            error: (e, ctx) => {
-                const msg = `[error]${ctx?.request_id ? ` id=${ctx.request_id}` : ""} ${e?.stack || e}`;
-                if (format) {
-                    log.error?.(format("error", msg));
-                } else {
-                    log.error?.(msg);
-                }
-            }
-        }
-    };
+        logger,
+        logStore,
+    });
 
-    // Collect routes via registry
-    const registry = new RouteRegistry();
-    await registerApps(registry);
-
-    log.info?.(`[boot] host:${host} HTTP:${httpPort} HTTPS:${httpsPort} SFTP:${enableSftp ? (process.env.SFTP_PORT || 2022) : "off"}`);
-
-    // server.ts (ensure this exists before bootAllFromRegistry)
-    opts.logger = {
-        access: (r) => {
-            const size = r.bytes < 1024 ? `${r.bytes}B` : `${(r.bytes / 1024).toFixed(1)}KB`;
-            console.log(
-                `[access] ${r.status} ${r.method} ${r.path} ${r.duration_ms}ms ${size} id=${r.request_id} ip=${r.ip ?? "-"}`
-            );
-        },
-        error: (e, ctx) => {
-            console.error(`[error]${ctx?.request_id ? ` id=${ctx.request_id}` : ""} ${e?.stack || e}`);
-        },
-    };
-
-    await bootAllFromRegistry(registry, opts);
-    await startCli(registry);
+    logger.access?.({
+        ts: new Date().toISOString(),
+        method: "BOOT",
+        url: "",
+        path: "/",
+        status: 200,
+        duration_ms: 0,
+        bytes: 0,
+        ip: undefined,
+        request_id: "boot",
+        user_agent: "",
+        referer: "",
+    });
+    console.log(`✅ Server up at http://${HOST}:${PORT}`);
 }
 
 main().catch((err) => {
