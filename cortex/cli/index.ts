@@ -8,6 +8,7 @@ import {showMigrationRunnerUsage} from "./migration/runner-help";
 import {pathToFileURL} from "url";
 import {runFixFilenames} from "./filename/fix-filenames";
 import {showFilenamesUsage} from "./filename/filenames-help";
+import {RouteRegistry} from "../http/route_registry";
 
 type Action = "up" | "down" | "refresh" | "fresh";
 
@@ -56,7 +57,8 @@ function parseFlags(argv: string[]): Flags {
 }
 
 /** Exported entry so other modules can invoke the CLI programmatically. */
-export async function runCli(args?: string[]) {
+export async function runCli(args?: string[], registry?: RouteRegistry) {
+    void registry; // keep param referenced to avoid TS6133
     const argv = args ?? process.argv.slice(2);
 
     if (argv.length === 0) {

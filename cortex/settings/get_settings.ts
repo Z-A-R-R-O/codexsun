@@ -83,3 +83,17 @@ export function getPoolSettings(prefix: string): PoolSettings {
 
     return pool;
 }
+
+/** Application host (APP_HOST or HOST) */
+export function getAppHost(): string {
+    const raw = getEnv("APP_HOST") || getEnv("HOST");
+    if (!raw) return "0.0.0.0";
+    return raw.replace(/^https?:\/\//, ""); // strip protocol if present
+}
+/** Application port (APP_PORT or PORT) */
+export function getAppPort(): number {
+    const raw = getEnv("APP_PORT") || getEnv("PORT");
+    const port = toNum(raw);
+    if (!port || port <= 0 || port >= 65536) return 3000;
+    return port;
+}

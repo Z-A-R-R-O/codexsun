@@ -1,16 +1,9 @@
-// apps/blog/app.ts
+// apps/cxsun/app.ts
+import type { RouteRegistry } from '../route_registry';
+import { tenantRouteProvider } from './src/tenant/code/tenant.api';
 
-import {FastifyInstance} from "fastify";
-import registerUserApi from "./src/user/core/user.api";
-
-export async function registerApp(fastify: FastifyInstance) {
-
-    // Global healthy check
-    fastify.get("/cxsun_hlz", async () => {
-        return {status: "ok", service: "cxsun"};
-    });
-
-    await fastify.register(registerUserApi ,{prefix: "/api"}); // You can change the prefix as needed
-
-    // You can register more APIs here in the future
+export async function registerApp(registry: RouteRegistry) {
+    // mount tenant API via route provider
+    registry.addProvider(tenantRouteProvider);
+    // You can add more providers here per app feature
 }

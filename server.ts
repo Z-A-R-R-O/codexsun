@@ -1,92 +1,99 @@
-// server.ts
-import Fastify, { FastifyInstance } from "fastify";
+// server.ts — bare Node entry (replaces Fastify), with env, CLI, logger, and serve_all wiring
 import "dotenv/config";
-import { formatServerLog, ServerLogger } from "./cortex/utils/server-logger";
-import { getAppHost, getAppPort } from "./cortex/settings/get_settings";
+import { RouteRegistry } from "./cortex/http/route_registry";
+import { bootAllFromRegistry, type BootOptions } from "./cortex/http/serve_all";
 import { registerApps } from "./cortex/main";
 
-const HOST = getAppHost();
-const PORT = getAppPort();
+// ---- helpers ----
+const envBool = (v?: string, def = false) => (v === undefined ? def : /^(1|true|yes|on)$/i.test(v));
+const envInt  = (v?: string, def = 0) => { const n = v ? parseInt(v, 10) : NaN; return Number.isFinite(n) ? n : def; };
 
-async function startServer() {
-    const fastify: FastifyInstance = Fastify({
-        logger: {
-            stream: {
-                write(msg: string) {
-                    try {
-                        const log = JSON.parse(msg);
-                        console.log(formatServerLog(log));
-                    } catch {
-                        console.log(msg.trim());
-                    }
-                },
-            },
-        },
-    });
+async function resolveHostPort() {
+    // Prefer project settings if available; fallback to env
+    try {
+        const { getAppHost, getAppPort } = await import("./cortex/settings/get_settings");
+        return { host: getAppHost(), port: getAppPort() };
+    } catch {
+        return { host: process.env.HOST || "0.0.0.0", port: envInt(process.env.PORT, 3000) };
+    }
+}
 
-    // ✅ Enable CORS (manual, since @fastify/cors doesn’t support v5 yet)
-    fastify.addHook("onRequest", (req, reply, done) => {
-        reply.header("Access-Control-Allow-Origin", "*");
-        reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-        reply.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+async function getLogger() {
+    try {
+        const mod: any = await import("./cortex/utils/server-logger");
+        const Logger = mod.ServerLogger ?? class { info=console.log; warn=console.warn; error=console.error; debug=console.debug; };
+        const inst = new Logger();
+        return { log: inst, format: mod.formatServerLog as ((...a:any[])=>string)|undefined };
+    } catch {
+        return { log: console, format: undefined };
+    }
+}
 
-        if (req.method === "OPTIONS") {
-            reply.status(204).send();
-            return;
-        }
-
-        done();
-    });
-
-    // ✅ Register all Cortex apps dynamically
-    await registerApps(fastify);
-
-    // ✅ Default root route
-    fastify.get("/", async () => ({ message: "Welcome to Codexsun!" }));
-
-    // ✅ Catch-all 404 JSON handler
-    fastify.setNotFoundHandler((req, reply) => {
-        reply.status(404).send({
-            error: "Not Found",
-            message: `Route ${req.method} ${req.url} not found`,
-            statusCode: 404,
+async function startCli(registry: RouteRegistry) {
+    try {
+        const { runCli } = await import("./cortex/cli/index");
+        process.stdin.setEncoding("utf8");
+        console.log("💻 CLI ready. Type `help`.");
+        process.stdin.on("data", async (chunk: string) => {
+            const input = String(chunk).trim();
+            if (!input) return;
+            const args = input.split(/\s+/);
+            try { await runCli(args, registry); } catch (err) { console.error("CLI error:", err); }
         });
-    });
-
-    try {
-        await fastify.listen({ port: PORT, host: HOST });
-        ServerLogger(`🚀 Server running on http://${HOST}:${PORT}`);
-    } catch (err) {
-        fastify.log.error(err);
-        process.exit(1);
+    } catch {
+        // CLI is optional; ignore if not present
     }
 }
 
-async function startCli() {
-    const { runCli } = await import("./cortex/cli/index");
+async function main() {
+    const { host, port } = await resolveHostPort();
+    const { log } = await getLogger();
 
-    console.log("💻 CLI is ready. Type commands below:");
-    process.stdin.setEncoding("utf8");
+    // HTTP/HTTPS/SFTP ports & TLS from env
+    const httpPort   = envInt(process.env.HTTP_PORT || String(port), port);
+    const httpsPort  = envInt(process.env.HTTPS_PORT, 3443);
+    const enableSftp = envBool(process.env.SFTP_ENABLE, true);
 
-    process.stdin.on("data", async (chunk: string) => {
-        const input = chunk.trim();
-        if (!input) return;
+    const opts: Omit<BootOptions, "providers"> = {
+        httpPort,
+        httpsPort,
+        tlsKeyPath: process.env.TLS_KEY  || "server.key",
+        tlsCertPath: process.env.TLS_CERT || "server.crt",
+        tlsCaPath:   process.env.TLS_CA,
+        sftp: {
+            enable: enableSftp,
+            port: envInt(process.env.SFTP_PORT, 2022),
+            hostKeyPath: process.env.SSH_HOST_KEY || "ssh_host_ed25519_key",
+            rootDir: process.env.SFTP_ROOT || "sftp-root",
+            users: [{ username: process.env.SFTP_USER || "demo", password: process.env.SFTP_PASS || "demo" }],
+        },
+    };
 
-        const args = input.split(/\s+/);
-        try {
-            await runCli(args);
-        } catch (err) {
-            console.error("CLI error:", err);
+    // Collect routes via registry -> apps -> tenant.api providers
+    const registry = new RouteRegistry();
+
+    // Prefer local ./main; fallback to legacy ./cortex/main if needed
+    try {
+        await registerApps(registry);
+    } catch {
+        const legacy = await import("./cortex/main");
+        if (typeof (legacy as any).registerApps === "function") {
+            await (legacy as any).registerApps(registry);
+        } else {
+            throw new Error("registerApps not found in ./main or ./cortex/main");
         }
-    });
+    }
+
+    log.info?.(
+        `[boot] host:${host} HTTP:${httpPort} HTTPS:${httpsPort} SFTP:${enableSftp ? (process.env.SFTP_PORT || 2022) : "off"}`
+    );
+
+    await bootAllFromRegistry(registry, opts); // starts HTTP, HTTPS (if certs), and SFTP
+
+    await startCli(registry);
 }
 
-(async () => {
-    try {
-        await startServer();  // start Fastify API server
-        await startCli();     // run CLI in parallel
-    } catch (err: any) {
-        console.error("Fatal startup error", err);
-        process.exit(1);
-    }
-})();
+main().catch((err) => {
+    console.error("Fatal startup error", err);
+    process.exit(1);
+});

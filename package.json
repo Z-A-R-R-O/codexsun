@@ -69,7 +69,9 @@
     "react-to-print": "^3.1.1",
     "recharts": "^3.1.0",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.3.1"
+    "tailwind-merge": "^3.3.1",
+    "ssh2": "^1.17.0",
+    "@types/ssh2": "^1.5.11"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.11",
