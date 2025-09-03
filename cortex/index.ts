@@ -1,6 +1,6 @@
 // cortex/index.ts
 
-import { Controller } from "./framework/controller";
+import { Controller } from "./core/controller";
 import { IRequest } from "./core/IRequest";
 
 // add more framework exports as you build them

@@ -1,113 +1,165 @@
-import type { DBConfig, DBDriver } from './types';
-import { makeConfigKey } from './types';
-import {
-    getGlobalEnv,
-    getPrefixedEnv,
-    getPoolSettings,
-} from '../settings/get_settings';
+// cortex/database/getDbConfig.ts
+import { makeConfigKey, type DBConfig, type DBDriver } from "./types";
+import { getPrefixedEnv, getPoolSettings } from "../settings/get_settings";
+
+/* ------------------------------ helpers ------------------------------ */
+function num(v: string | undefined): number | undefined {
+    if (v == null || v === "") return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+function bool(v: string | undefined): boolean | undefined {
+    if (v == null || v === "") return undefined;
+    const s = v.toLowerCase();
+    if (["1", "true", "yes", "on"].includes(s)) return true;
+    if (["0", "false", "no", "off"].includes(s)) return false;
+    return undefined;
+}
+function inferDriverFromUrl(url?: string): DBDriver | undefined {
+    if (!url) return undefined;
+    const m = url.match(/^([a-z0-9+]+):/i);
+    if (!m) return undefined;
+    const scheme = m[1].toLowerCase();
+    if (scheme.startsWith("postgres")) return "postgres";
+    if (scheme.startsWith("mysql")) return "mysql";
+    if (scheme.startsWith("mariadb")) return "mariadb";
+    if (scheme.startsWith("mongodb") || scheme.startsWith("mongo")) return "mongodb";
+    if (scheme.startsWith("sqlite")) return "sqlite";
+    return undefined;
+}
+function prune<T extends Record<string, any>>(o: T): T {
+    Object.keys(o).forEach((k) => o[k] === undefined && delete o[k]);
+    return o;
+}
+/** Ensure PROFILE is uppercased and safe for env prefixing */
+function up(s: string): string {
+    return String(s).toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+}
+
+/* ------------------------------ core readers ------------------------------ */
 
 /**
- * Profile-based config:
- *   - profile 'default' → read global DB_* keys
- *   - profile 'BLUE'    → read BLUE_DB_* keys
- *   - profile 'SANDBOX' → read SANDBOX_DB_* keys
+ * Read a DB config from a single prefix (e.g., "MDB", "DB", "BLUE_DB").
+ * Supports both PASS and PASSWORD.
  */
-export function getDbConfig(profileRaw?: string): DBConfig {
-    const profile = (profileRaw || 'default').trim();
-    const isDefault = profile.toLowerCase() === 'default';
-    const read = (key: string) =>
-        isDefault ? getGlobalEnv(key) : getPrefixedEnv(profile, key);
+function readFromPrefix(profile: string, prefix: string): Partial<DBConfig> {
+    const url = getPrefixedEnv(prefix, "URL");
+    let driver = (getPrefixedEnv(prefix, "DRIVER") as DBDriver | undefined) ?? inferDriverFromUrl(url);
 
-    const driver = ((read('DRIVER') || 'mariadb') as DBDriver);
+    // sqlite file convenience
+    const file = getPrefixedEnv(prefix, "FILE") ?? getPrefixedEnv(prefix, "NAME");
+    const host = getPrefixedEnv(prefix, "HOST");
+    const port = num(getPrefixedEnv(prefix, "PORT"));
+    const user = getPrefixedEnv(prefix, "USER");
+    const password = getPrefixedEnv(prefix, "PASSWORD") ?? getPrefixedEnv(prefix, "PASS");
+    const database = getPrefixedEnv(prefix, "NAME") ?? file;
+    const ssl = bool(getPrefixedEnv(prefix, "SSL"));
 
-    if (driver === 'sqlite') {
-        const file =
-            read('FILE') ||
-            // fallback to global DB_FILE if profile value missing
-            getGlobalEnv('FILE') ||
-            `./data/${profile.toLowerCase()}.sqlite`;
-        const ssl = toBool(read('SSL'));
-        const pool = getPoolSettings(isDefault ? undefined : profile);
-
-        const cfgKey = makeConfigKey({ profile, driver, file, ssl, ...pool });
-
-        return { profile, driver, file, ssl, pool, cfgKey };
-    }
-
-    // Network drivers
-    const host = required('DB_HOST', read('HOST'), { profile, driver });
-    const port = toInt(read('PORT')) ?? defaultPort(driver);
-    const user = required('DB_USER', read('USER'), { profile, driver });
-    // Support both PASS and PASSWORD (global uses DB_PASS in your sample)
-    const password = required('DB_PASSWORD|DB_PASS', read('PASSWORD') ?? read('PASS'), {
+    const cfg: any = prune({
         profile,
         driver,
-    });
-    const database = required('DB_NAME', read('NAME'), { profile, driver });
-    const socketPath = read('SOCKET_PATH');
-    const ssl = toBool(read('SSL'));
-    const pool = getPoolSettings(isDefault ? undefined : profile);
-
-    const cfgKey = makeConfigKey({
-        profile,
-        driver,
-        host,
-        port,
-        user,
-        database,
-        ssl,
-        socketPath,
-        ...pool,
-    });
-
-    return {
-        profile,
-        driver,
+        url,
         host,
         port,
         user,
         password,
         database,
-        socketPath,
         ssl,
-        pool,
-        cfgKey,
-    };
+    });
+
+    return cfg;
 }
 
-function defaultPort(driver: DBDriver): number {
-    switch (driver) {
-        case 'postgres': return 5432;
-        case 'mariadb':  return 3306;
-        case 'mysql':  return 3306;
-        case 'mongodb':  return 3306;
-        case 'sqlite':   return 0;
+/**
+ * Merge pool settings. If `preferPrefix` is supplied, any missing pool fields
+ * will fall back to the `fallbackPrefix` (e.g., fallback to generic DB_*).
+ */
+function mergedPoolSettings(preferPrefix: string, fallbackPrefix?: string) {
+    const a = getPoolSettings(preferPrefix);
+    if (!fallbackPrefix) return a;
+    const b = getPoolSettings(fallbackPrefix);
+    return prune({
+        min: a.min ?? b.min,
+        max: a.max ?? b.max,
+        idleMillis: a.idleMillis ?? b.idleMillis,
+        acquireTimeoutMillis: a.acquireTimeoutMillis ?? b.acquireTimeoutMillis,
+    });
+}
+
+/**
+ * Build final DBConfig for master (MDB_* only). No DB_* fallback.
+ * If nothing is set, we default to sqlite ./data/dev.sqlite for convenience.
+ */
+function buildMasterConfig(): DBConfig {
+    const profile = "default";
+    const prefix = "MDB";
+
+    const cfg: any = readFromPrefix(profile, prefix);
+
+    // If nothing was provided, default to sqlite
+    if (!cfg.driver && !cfg.url && !cfg.host && !cfg.database) {
+        cfg.driver = "sqlite";
+        cfg.database = "./data/dev.sqlite";
     }
-}
 
-function required(name: string, val: string | undefined, ctx: Record<string, unknown>): string {
-    if (val == null || val === '') {
-        const ctxPairs = Object.entries(ctx)
-            .filter(([, v]) => v !== undefined)
-            .map(([k, v]) => `${k}=${v}`)
-            .join(' ');
-        throw new Error(`Missing required env: ${name}${ctxPairs ? ` (${ctxPairs})` : ''}`);
+    // If sqlite and no database set, apply default dev file
+    if ((cfg.driver ?? "").toLowerCase() === "sqlite" && !cfg.database) {
+        cfg.database = "./data/dev.sqlite";
     }
-    return val;
+
+    cfg.pool = mergedPoolSettings(prefix);
+    cfg.cfgKey = makeConfigKey(cfg);
+    return cfg as DBConfig;
 }
 
-function toInt(raw?: string): number | undefined {
-    if (!raw) return undefined;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : undefined;
+/**
+ * Build final DBConfig for a non-default profile.
+ * Read <PROFILE>_DB_* first, then fall back to generic DB_* for any missing fields.
+ */
+function buildProfileConfig(profile: string): DBConfig {
+    const PROFILE_DB = `${up(profile)}_DB`;
+
+    // Prefer <PROFILE>_DB_*
+    const a: any = readFromPrefix(profile, PROFILE_DB);
+
+    // Fallback to generic DB_* for any missing fields
+    const b: any = readFromPrefix(profile, "DB");
+
+    const cfg: any = prune({
+        profile,
+        driver: a.driver ?? b.driver,
+        url: a.url ?? b.url,
+        host: a.host ?? b.host,
+        port: a.port ?? b.port,
+        user: a.user ?? b.user,
+        password: a.password ?? b.password,
+        database: a.database ?? b.database,
+        ssl: a.ssl ?? b.ssl,
+    });
+
+    // Pool: prefer <PROFILE>_DB_*, then fallback to DB_*
+    cfg.pool = mergedPoolSettings(PROFILE_DB, "DB");
+
+    cfg.cfgKey = makeConfigKey(cfg);
+    return cfg as DBConfig;
 }
 
-function toBool(raw?: string): boolean | undefined {
-    if (raw == null) return undefined;
-    const v = raw.trim().toLowerCase();
-    if (['1', 'true', 'yes', 'on'].includes(v)) return true;
-    if (['0', 'false', 'no', 'off'].includes(v)) return false;
-    return undefined;
+/* ------------------------------ Public API ------------------------------ */
+
+/**
+ * Master/shared (tenants registry) config:
+ * - Default profile ALWAYS uses MDB_* (NO DB_* fallback).
+ * - If MDB_* is missing entirely, defaults to sqlite ./data/dev.sqlite.
+ */
+export function getDbConfig(profile: string = "default"): DBConfig {
+    if (profile === "default" || up(profile) === "MDB") {
+        return buildMasterConfig();
+    }
+    // Any other profile uses <PROFILE>_DB_* with fallback to DB_*
+    return buildProfileConfig(profile);
 }
 
-export default getDbConfig;
+/** Explicit master getter if you want to be clear in call sites. */
+export function getMasterDbConfig(): DBConfig {
+    return buildMasterConfig();
+}

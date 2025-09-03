@@ -122,7 +122,7 @@ export function normalizeParams(driver: Driver, params?: unknown): unknown[] {
 /**
  * Adapt SQL + params to the target driver
  */
-export function queryAdapter(
+export function QueryAdapter(
     driver: Driver,
     sql: string,
     params?: unknown

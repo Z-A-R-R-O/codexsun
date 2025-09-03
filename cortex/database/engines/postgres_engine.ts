@@ -2,7 +2,7 @@
 import { BaseEngine } from "../Engine";
 import type { NetworkDBConfig } from "../types";
 import { Pool, PoolClient } from "pg";
-import { queryAdapter, rowsAdapter } from "../queryAdapter"; // shared helpers
+import { QueryAdapter, rowsAdapter } from "../queryAdapter"; // shared helpers
 
 export class PostgresEngine extends BaseEngine {
     private cfg: NetworkDBConfig;
@@ -58,7 +58,7 @@ export class PostgresEngine extends BaseEngine {
         sql: string,
         params?: unknown
     ): Promise<T | null> {
-        const { sql: normSql, params: normParams } = queryAdapter("postgres", sql, params);
+        const { sql: normSql, params: normParams } = QueryAdapter("postgres", sql, params);
         const c = await this._get_connection();
         try {
             const res = await c.query(normSql, normParams as any[]);
@@ -73,7 +73,7 @@ export class PostgresEngine extends BaseEngine {
         sql: string,
         params?: unknown
     ): Promise<T[]> {
-        const { sql: normSql, params: normParams } = queryAdapter("postgres", sql, params);
+        const { sql: normSql, params: normParams } = QueryAdapter("postgres", sql, params);
         const c = await this._get_connection();
         try {
             const res = await c.query(normSql, normParams as any[]);
@@ -84,7 +84,7 @@ export class PostgresEngine extends BaseEngine {
     }
 
     protected async _execute(sql: string, params?: unknown): Promise<any> {
-        let { sql: normSql, params: normParams } = queryAdapter("postgres", sql, params);
+        let { sql: normSql, params: normParams } = QueryAdapter("postgres", sql, params);
 
         // Auto-append RETURNING id for inserts without RETURNING
         if (/^\s*insert/i.test(normSql) && !/returning\s+/i.test(normSql)) {
@@ -114,7 +114,7 @@ export class PostgresEngine extends BaseEngine {
     }
 
     protected async _executemany(sql: string, paramSets: unknown[]): Promise<any> {
-        let { sql: normSql } = queryAdapter("postgres", sql);
+        let { sql: normSql } = QueryAdapter("postgres", sql);
 
         // Ensure inserts always return IDs
         if (/^\s*insert/i.test(normSql) && !/returning\s+/i.test(normSql)) {
@@ -127,7 +127,7 @@ export class PostgresEngine extends BaseEngine {
             if (/^\s*select/i.test(normSql)) {
                 const allRows: any[] = [];
                 for (const p of paramSets) {
-                    const { params: normParams } = queryAdapter("postgres", sql, p);
+                    const { params: normParams } = QueryAdapter("postgres", sql, p);
                     const res = await c.query(normSql, normParams as any[]);
                     allRows.push(...(res.rows ?? []));
                 }
@@ -139,7 +139,7 @@ export class PostgresEngine extends BaseEngine {
             let total = 0;
             const insertIds: number[] = [];
             for (const p of paramSets) {
-                const { params: normParams } = queryAdapter("postgres", sql, p);
+                const { params: normParams } = QueryAdapter("postgres", sql, p);
                 const res = await c.query(normSql, normParams as any[]);
                 const rows = rowsAdapter("postgres", res.rows ?? []);
                 total += res.rowCount ?? 0;

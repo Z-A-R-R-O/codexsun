@@ -3,7 +3,7 @@ import { BaseEngine } from "../Engine";
 import type { NetworkDBConfig } from "../types";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
-import { queryAdapter, rowsAdapter } from "../queryAdapter";
+import { QueryAdapter, rowsAdapter } from "../queryAdapter";
 
 export class SqliteEngine extends BaseEngine {
     private cfg: NetworkDBConfig;
@@ -53,7 +53,7 @@ export class SqliteEngine extends BaseEngine {
     }
 
     protected async _execute(sql: string, params?: unknown): Promise<any> {
-        const { sql: normSql, params: normParams } = queryAdapter("sqlite", sql, params);
+        const { sql: normSql, params: normParams } = QueryAdapter("sqlite", sql, params);
         const db = await this._get_connection();
 
         // Detect SELECT
@@ -75,13 +75,13 @@ export class SqliteEngine extends BaseEngine {
     }
 
     protected async _executemany(sql: string, paramSets: unknown[]): Promise<any> {
-        const { sql: normSql } = queryAdapter("sqlite", sql);
+        const { sql: normSql } = QueryAdapter("sqlite", sql);
         const db = await this._get_connection();
 
         if (/^\s*select/i.test(normSql)) {
             const allRows: any[] = [];
             for (const p of paramSets) {
-                const { params: normParams } = queryAdapter("sqlite", sql, p);
+                const { params: normParams } = QueryAdapter("sqlite", sql, p);
                 const rows = await db.all(normSql, normParams as any[]);
                 allRows.push(...rows);
             }
@@ -93,7 +93,7 @@ export class SqliteEngine extends BaseEngine {
         let total = 0;
         let lastID: number | undefined;
         for (const p of paramSets) {
-            const { params: normParams } = queryAdapter("sqlite", sql, p);
+            const { params: normParams } = QueryAdapter("sqlite", sql, p);
             const res = await db.run(normSql, normParams as any[]);
             total += res.changes ?? 0;
             lastID = res.lastID;

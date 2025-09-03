@@ -2,7 +2,7 @@
 import { BaseEngine } from "../Engine";
 import type { NetworkDBConfig } from "../types";
 import mariadb, { Pool, PoolConnection } from "mariadb";
-import { queryAdapter, rowsAdapter } from "../queryAdapter";
+import { QueryAdapter, rowsAdapter } from "../queryAdapter";
 
 export class MariaDBEngine extends BaseEngine {
     private cfg: NetworkDBConfig;
@@ -61,7 +61,7 @@ export class MariaDBEngine extends BaseEngine {
     }
 
     protected async _execute(sql: string, params?: unknown): Promise<any> {
-        const { sql: normSql, params: normParams } = queryAdapter("mariadb", sql, params);
+        const { sql: normSql, params: normParams } = QueryAdapter("mariadb", sql, params);
         const conn = await this._get_connection();
         try {
             const res: any = await conn.query(normSql, normParams as any);
@@ -87,13 +87,13 @@ export class MariaDBEngine extends BaseEngine {
     }
 
     protected async _executemany(sql: string, paramSets: unknown[]): Promise<any> {
-        const { sql: normSql } = queryAdapter("mariadb", sql);
+        const { sql: normSql } = QueryAdapter("mariadb", sql);
         const conn = await this._get_connection();
         try {
             if (/^\s*select/i.test(normSql)) {
                 const allRows: any[] = [];
                 for (const p of paramSets) {
-                    const { params: normParams } = queryAdapter("mariadb", sql, p);
+                    const { params: normParams } = QueryAdapter("mariadb", sql, p);
                     const res: any = await conn.query(normSql, normParams as any);
                     if (Array.isArray(res)) allRows.push(...res);
                 }
@@ -105,7 +105,7 @@ export class MariaDBEngine extends BaseEngine {
             let total = 0;
             const insertIds: number[] = [];
             for (const p of paramSets) {
-                const { params: normParams } = queryAdapter("mariadb", sql, p);
+                const { params: normParams } = QueryAdapter("mariadb", sql, p);
                 const res: any = await conn.query(normSql, normParams as any);
                 total += res?.affectedRows ?? 0;
                 if (res?.insertId !== undefined) {

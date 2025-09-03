@@ -1,44 +1,46 @@
-// apps/user/user.controller.ts
-import {Controller, Request} from "../../../../../cortex/core/controller";
-import {UserService} from "./user.service";
-import tenantController from "../../tenant/code/tenant.controller";
+// user.controller.ts
+import { UserService } from "./user.service";
+import { IRequest } from "../../../../../cortex/core/controller"; // type only
 
-export class UserController extends Controller<UserService> {
+export class UserController {
+    private service: UserService;
 
     constructor() {
-        const service = new UserService();
-        super(service, "/users");
-        this.service = service;
-
-        this.use("auth").only(["Store", "Update", "Delete"]);
+        this.service = new UserService();
     }
 
-    protected async indexImpl(req: Request) {
-        return this.service.findAll(req.query);
+    async Index(req: IRequest) {
+        return { status: "ok", data: await this.service.findAll(req.query) };
     }
 
-    protected async showImpl(req: Request) {
-        return this.service.findByIdOrFail(Number(req.params["id"]));
+    async Show(req: IRequest) {
+        const id = Number(req.params.id);
+        const user = await this.service.findById(id);
+        return { status: "ok", data: user };
     }
 
-    protected async storeImpl(req: Request) {
-        return this.service.create(req.body);
+    async Store(req: IRequest) {
+        const user = await this.service.create(req.body);
+        return { status: "ok", data: user };
     }
 
-    protected async updateImpl(req: Request) {
-        return this.service.update(Number(req.params["id"]), req.body);
+    async Update(req: IRequest) {
+        const id = Number(req.params.id);
+        const user = await this.service.update(id, req.body);
+        return { status: "ok", data: user };
     }
 
-    protected async deleteImpl(req: Request) {
-        await this.service.remove(Number(req.params["id"]));
-        return {deleted: true};
+    async Delete(req: IRequest) {
+        const id = Number(req.params.id);
+        await this.service.remove(id);
+        return { status: "ok", message: `User ${id} deleted` };
     }
 
-    protected async countImpl() {
-        return this.service.count();
+    async Count(_req: IRequest) {
+        return { status: "ok", count: await this.service.count() };
     }
 
-    protected async nextNoImpl() {
-        return this.service.nextSequence();
+    async NextNo(_req: IRequest) {
+        return { status: "ok", next: await this.service.nextNo() };
     }
 }

@@ -44,7 +44,7 @@ function printResult(success: boolean, msg: string) {
     }
 }
 
-export async function tenantIntegrationTests() {
+export async function tenantIntegrationTests(p0: { routerPathCandidates: string[]; }) {
     console.log(chalk.magenta("▶ Tenant Integration Tests starting with real DB + HTTP"));
 
     // 🔄 Reset DB before running tests

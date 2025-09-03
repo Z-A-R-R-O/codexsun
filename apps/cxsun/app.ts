@@ -1,10 +1,16 @@
 // apps/blog/app.ts
+
 import {FastifyInstance} from "fastify";
-import tenantController from "./src/tenant/code/tenant.controller";
 import registerUserApi from "./src/user/core/user.api";
 
 export async function registerApp(fastify: FastifyInstance) {
-    // Register app modules
-    await fastify.register(tenantController, {prefix: "api/tenants"});
-    await fastify.register(registerUserApi, {prefix: "/api"});
+
+    // Global healthy check
+    fastify.get("/cxsun_hlz", async () => {
+        return {status: "ok", service: "cxsun"};
+    });
+
+    await fastify.register(registerUserApi ,{prefix: "/api"}); // You can change the prefix as needed
+
+    // You can register more APIs here in the future
 }

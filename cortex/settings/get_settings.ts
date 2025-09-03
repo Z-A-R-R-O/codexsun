@@ -1,60 +1,85 @@
-// Simple env helpers (no tenant logic)
+// cortex/settings/get_settings.ts
 
-export function getEnv(name: string): string | undefined {
-    return process.env[name];
+export type PoolSettings = {
+    min?: number;
+    max?: number;
+    idleMillis?: number;
+    acquireTimeoutMillis?: number;
+};
+
+/**
+ * Internal helper to read from process.env treating empty string as undefined.
+ */
+function getEnv(name: string | undefined): string | undefined {
+    if (!name) return undefined;
+    const v = process.env[name];
+    return v === "" || v === undefined ? undefined : v;
 }
 
-export function getEnvBool(name: string, fallback?: boolean): boolean | undefined {
-    const raw = getEnv(name);
-    if (raw == null) return fallback;
-    const v = raw.trim().toLowerCase();
-    if (['1', 'true', 'yes', 'on'].includes(v)) return true;
-    if (['0', 'false', 'no', 'off'].includes(v)) return false;
-    return fallback;
-}
-
-export function getEnvInt(name: string, fallback?: number): number | undefined {
-    const raw = getEnv(name);
-    if (!raw) return fallback;
-    const n = Number(raw);
-    return Number.isFinite(n) ? n : fallback;
-}
-
-/** Read PREFIX_DB_KEY (e.g., BLUE_DB_HOST). Case-insensitive prefix. */
-export function getPrefixedEnv(prefix: string, key: string): string | undefined {
-    const P = String(prefix || '').trim().toUpperCase();
-    return getEnv(`${P}_DB_${key}`);
-}
-
-/** Read global DB_KEY (e.g., DB_HOST). */
+/**
+ * Return a raw env var by key (no prefix logic).
+ * Example: getGlobalEnv("HOME") -> process.env.HOME
+ */
 export function getGlobalEnv(key: string): string | undefined {
-    return getEnv(`DB_${key}`);
+    const k = String(key || "").trim();
+    if (!k) return undefined;
+    return getEnv(k);
 }
 
-export function getPoolSettings(prefix?: string) {
-    const read = prefix ? (k: string) => getPrefixedEnv(prefix, k) : (k: string) => getGlobalEnv(k);
-    return {
-        min: toInt(read('POOL_MIN')),
-        max: toInt(read('POOL_MAX')),
-        idleMillis: toInt(read('POOL_IDLE')),
-        acquireTimeoutMillis: toInt(read('POOL_ACQUIRE')),
-    };
-
-    function toInt(raw?: string): number | undefined {
-        if (!raw) return undefined;
-        const n = Number(raw);
-        return Number.isFinite(n) ? n : undefined;
-    }
+/**
+ * Read an env with a PREFIX_KEY form. Empty string is treated as undefined.
+ * The prefix is used verbatim (uppercased). We DO NOT inject extra segments.
+ *
+ * Examples:
+ *  - getPrefixedEnv("MDB", "DRIVER")        -> process.env.MDB_DRIVER
+ *  - getPrefixedEnv("DB", "HOST")           -> process.env.DB_HOST
+ *  - getPrefixedEnv("BLUE_DB", "PASSWORD")  -> process.env.BLUE_DB_PASSWORD
+ */
+export function getPrefixedEnv(prefix: string, key: string): string | undefined {
+    const P = String(prefix || "").toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+    const K = String(key || "").toUpperCase().replace(/[^A-Z0-9_]/g, "_");
+    if (!P || !K) return undefined;
+    return getEnv(`${P}_${K}`);
 }
 
-/** Application host (APP_HOST or HOST) */
-export function getAppHost(): string {
-    const raw = getEnv("APP_HOST") || getEnv("HOST");
-    if (!raw) return "0.0.0.0";
-    return raw.replace(/^https?:\/\//, ""); // strip protocol if present
+/**
+ * Parse a string to number (undefined if invalid/missing).
+ */
+function toNum(v?: string): number | undefined {
+    if (v == null || v === "") return undefined;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
 }
 
-/** Application port (APP_PORT or PORT) */
-export function getAppPort(): number {
-    return getEnvInt("APP_PORT", getEnvInt("PORT", 3000)) ?? 3000;
+/**
+ * Pool settings reader for a given prefix. Example prefixes:
+ *  - "MDB"
+ *  - "DB"
+ *  - "BLUE_DB"
+ *  - "SANDBOX_DB"
+ *
+ * It reads (new names first, fallback to legacy names for compatibility):
+ *   <PREFIX>_POOL_MIN
+ *   <PREFIX>_POOL_MAX
+ *   <PREFIX>_POOL_IDLE_MS           (fallback: <PREFIX>_POOL_IDLE)
+ *   <PREFIX>_POOL_ACQUIRE_TIMEOUT_MS (fallback: <PREFIX>_POOL_ACQUIRE)
+ */
+export function getPoolSettings(prefix: string): PoolSettings {
+    const read = (k: string) => getPrefixedEnv(prefix, k);
+    const first = (...xs: (string | undefined)[]) => xs.find((x) => x !== undefined);
+
+    const min = toNum(read("POOL_MIN"));
+    const max = toNum(read("POOL_MAX"));
+    const idleMillis = toNum(first(read("POOL_IDLE_MS"), read("POOL_IDLE")));
+    const acquireTimeoutMillis = toNum(
+        first(read("POOL_ACQUIRE_TIMEOUT_MS"), read("POOL_ACQUIRE"))
+    );
+
+    const pool: PoolSettings = {};
+    if (min !== undefined) pool.min = min;
+    if (max !== undefined) pool.max = max;
+    if (idleMillis !== undefined) pool.idleMillis = idleMillis;
+    if (acquireTimeoutMillis !== undefined) pool.acquireTimeoutMillis = acquireTimeoutMillis;
+
+    return pool;
 }

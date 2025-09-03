@@ -2,11 +2,11 @@
 import 'dotenv/config';
 
 
-import {userIntegrationTests} from "../../apps/cxsun/src/user/test/user_integration.test";
+import {userIntegrationTests} from "../../apps/cxsun/src/user/core/user_integration.test";
+
 
 async function main() {
-
-    await userIntegrationTests();
+    await userIntegrationTests()
 }
 
 main().catch((e) => {

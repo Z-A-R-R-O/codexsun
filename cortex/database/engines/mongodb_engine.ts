@@ -2,7 +2,7 @@
 import { BaseEngine, MaybePromise } from "../Engine";
 import type { NetworkDBConfig } from "../types";
 import { MongoClient, Db } from "mongodb";
-import { queryAdapter, rowsAdapter } from "../queryAdapter";
+import { QueryAdapter, rowsAdapter } from "../queryAdapter";
 
 export class MongodbEngine extends BaseEngine {
     protected _get_connection(): MaybePromise<unknown> {
@@ -73,7 +73,7 @@ export class MongodbEngine extends BaseEngine {
     protected async _execute(sql: string, params?: unknown): Promise<any> {
         if (!this.db) await this._connect();
 
-        const { sql: normSql, params: normParams } = queryAdapter("mongodb", sql, params);
+        const { sql: normSql, params: normParams } = QueryAdapter("mongodb", sql, params);
         const collectionName = this._getCollectionFromSql(normSql);
         const coll = this.db!.collection(collectionName);
 

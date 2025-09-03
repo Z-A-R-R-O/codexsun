@@ -1,6 +1,6 @@
 import Fastify from "fastify";
-import { UserRepo } from "../code/user.repo";
-import { UserController } from "../code/user.controller";
+import { UserRepo } from "../../tenant/temp/code/user.repo";
+import { UserController } from "../../tenant/temp/code/user.controller";
 import sqlite3pkg from "sqlite3";
 import chalk from "chalk";
 import { InMemorySqliteConnection } from "../../../../../cortex/database/contracts/InMemorySqliteConnection";

@@ -3,12 +3,12 @@ import fp from 'fastify-plugin';
 import type { FastifyPluginAsync } from 'fastify';
 import { UserController } from './user.controller';
 import { UserRepo } from './user.repo';
-import { ConnectionAdapter } from '../../../../../cortex/database/contracts/ConnectionAdapter';
-import { detectDialectFromVersionString } from '../../../../../cortex/database/contracts/dialects';
+import { ConnectionAdapter } from '../../../../../../cortex/database/contracts/ConnectionAdapter';
+// import { detectDialectFromVersionString } from '../../../../../cortex/database/contracts/dialects';
 
 
 // Use your existing connection manager
-import { getConnection } from '../../../../../cortex/database/connection_manager';
+import { getConnection } from '../../../../../../cortex/database/connection_manager';
 
 
 const UserApi: FastifyPluginAsync<{ profile?: string }> = fp(async (fastify, opts) => {
@@ -28,7 +28,7 @@ const UserApi: FastifyPluginAsync<{ profile?: string }> = fp(async (fastify, opt
             version = v2?.version ?? 'sqlite';
         } catch {}
     }
-    const dialect = detectDialectFromVersionString(version);
+    // const dialect = detectDialectFromVersionString(version);
 
 
     const repo = new UserRepo(conn, dialect);
