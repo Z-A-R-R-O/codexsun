@@ -1,93 +1,59 @@
-import { mdb } from "../../../../../cortex/database/db";
-import type { Tenant } from "./tenant.model";
+// apps/cxsun/src/tenant/code/tenant.repo.ts
 
-function nowIso() {
-  return new Date().toISOString();
+import type { Tenant, TenantID } from "./tenant.model";
+
+export interface ListOptions {
+  cursor?: string;
+  limit: number;
 }
 
-export class TenantRepository {
-  async init() {
-    // create table if not exists (engine-agnostic SQL; adjust types per engine as needed)
-    await mdb.query(`CREATE TABLE IF NOT EXISTS tenants (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE,
-      is_active INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`);
-    // lightweight index (no-op if exists)
-    try { await mdb.query(`CREATE INDEX IF NOT EXISTS idx_tenants_email ON tenants(email)`); } catch {}
+export interface ListResult<T> {
+  ok: true;
+  count: number;
+  items: T[];
+  nextCursor?: string;
+}
+
+export interface TenantRepo {
+  list(opts: ListOptions): Promise<ListResult<Tenant>>;
+  get(id: TenantID): Promise<Tenant | null>;
+  create(data: Omit<Tenant, "id" | "createdAt" | "updatedAt">): Promise<Tenant>;
+  update(id: TenantID, data: Partial<Omit<Tenant, "id" | "createdAt" | "updatedAt">>): Promise<Tenant | null>;
+  remove(id: TenantID): Promise<boolean>;
+}
+
+export class InMemoryTenantRepo implements TenantRepo {
+  private store: Map<TenantID, Tenant> = new Map();
+
+  async list(opts: ListOptions): Promise<ListResult<Tenant>> {
+    const all = Array.from(this.store.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const start = opts.cursor ? Math.max(0, all.findIndex(t => t.id === opts.cursor) + 1) : 0;
+    const items = all.slice(start, start + opts.limit);
+    const nextCursor = (start + opts.limit) < all.length ? items[items.length - 1]?.id : undefined;
+    return { ok: true, count: items.length, items, nextCursor };
   }
 
-  async create(data: Omit<Tenant, "createdAt" | "updatedAt">): Promise<Tenant> {
-    const now = nowIso();
-    const row: Tenant = { ...data, createdAt: now, updatedAt: now };
-    await mdb.query(
-      `INSERT INTO tenants (id, name, email, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      [row.id, row.name, row.email, row.isActive ? 1 : 0, row.createdAt, row.updatedAt]
-    );
-    return row;
+  async get(id: TenantID): Promise<Tenant | null> {
+    return this.store.get(id) ?? null;
   }
 
-  async get(id: string): Promise<Tenant | null> {
-    const r = await mdb.fetchOne<any>(
-      `SELECT id, name, email, is_active, created_at, updated_at FROM tenants WHERE id = ?`,
-      [id]
-    );
-    if (!r) return null;
-    return {
-      id: r.id,
-      name: r.name,
-      email: r.email,
-      isActive: !!(r.is_active ?? r.isActive),
-      createdAt: r.created_at ?? r.createdAt,
-      updatedAt: r.updated_at ?? r.updatedAt,
-    };
+  async create(data: Omit<Tenant, "id" | "createdAt" | "updatedAt">): Promise<Tenant> {
+    const now = new Date().toISOString();
+    const id = Math.random().toString(36).slice(2, 10);
+    const t: Tenant = { id, createdAt: now, updatedAt: now, ...data };
+    this.store.set(id, t);
+    return t;
   }
 
-  async list(limit = 50, offset = 0, q?: string): Promise<Tenant[]> {
-    const params: any[] = [];
-    let where = "";
-    if (q && q.trim()) {
-      where = `WHERE name LIKE ? OR email LIKE ?`;
-      const like = `%${q.trim()}%`;
-      params.push(like, like);
+  async update(id: TenantID, data: Partial<Omit<Tenant, "id" | "createdAt" | "updatedAt">>): Promise<Tenant | null> {
+    const existing = this.store.get(id);
+    if (!existing) return null;
+    const updated: Tenant = { ...existing, ...data, updatedAt: new Date().toISOString() };
+    this.store.set(id, updated);
+    return updated;
     }
-    params.push(limit, offset);
-    const rows = await mdb.fetchAll<any>(
-      `SELECT id, name, email, is_active, created_at, updated_at
-       FROM tenants ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-      params
-    );
-    return rows.map((r: any) => ({
-      id: r.id,
-      name: r.name,
-      email: r.email,
-      isActive: !!(r.is_active ?? r.isActive),
-      createdAt: r.created_at ?? r.createdAt,
-      updatedAt: r.updated_at ?? r.updatedAt,
-    }));
-  }
 
-  async update(id: string, patch: Partial<Pick<Tenant, "name" | "email" | "isActive">>): Promise<Tenant | null> {
-    const current = await this.get(id);
-    if (!current) return null;
-    const next: Tenant = {
-      ...current,
-      ...patch,
-      updatedAt: nowIso(),
-    };
-    await mdb.query(
-      `UPDATE tenants SET name = ?, email = ?, is_active = ?, updated_at = ? WHERE id = ?`,
-      [next.name, next.email, next.isActive ? 1 : 0, next.updatedAt, id]
-    );
-    return next;
-  }
-
-  async remove(id: string): Promise<boolean> {
-    await mdb.query(`DELETE FROM tenants WHERE id = ?`, [id]);
-    // If you need to know affected rows, extend mdb facade; otherwise assume true.
-    return true;
+  async remove(id: TenantID): Promise<boolean> {
+    return this.store.delete(id);
   }
 }

@@ -4,61 +4,64 @@ import { AbstractController } from "../../../../../cortex/http/controller/base.c
 import { TenantService } from "./tenant.service";
 
 export class TenantController extends AbstractController {
-    private svc: TenantService;
+  private svc: TenantService;
 
-    constructor(namespace = "default") {
-        super();
-        this.svc = new TenantService(namespace);
-    }
+  constructor(namespace = "default") {
+    super();
+    this.svc = new TenantService(namespace);
+  }
 
-    override async index(req: HttpRequest) {
-        const cursor = Array.isArray(req.query?.cursor) ? req.query?.cursor[0] : req.query?.cursor;
-        const limit = Number(req.query?.limit) || 20;
+  override async index(req: HttpRequest) {
+    const cursor = Array.isArray(req.query?.cursor) ? req.query?.cursor[0] : req.query?.cursor;
+    const limit = Number(req.query?.limit) || 20;
+    return this.svc.list({ cursor, limit });
+  }
 
-        return this.svc.list({ cursor, limit });
-    }
+  override async create(_req: HttpRequest) {
+    const meta = this.svc.meta();
+    return { ok: true, schema: meta.schema, defaults: meta.defaults };
+  }
 
+  override async edit(req: HttpRequest) {
+    const id = req.params?.id;
+    if (!id) return { ok: false, error: "BAD_REQUEST", message: "id is required" };
+    const item = await this.svc.get(id);
+    if (!item) return { ok: false, error: "NOT_FOUND" };
+    return { ok: true, item };
+  }
 
-    async create(_req: HttpRequest) {
-        // return defaults/metadata to create a tenant (like Laravel create)
-        return { ok: true, schema: this.svc.meta().schema, defaults: this.svc.meta().defaults };
-    }
+  override async update(req: HttpRequest) {
+    const id = req.params?.id;
+    if (!id) return { ok: false, error: "BAD_REQUEST", message: "id is required" };
+    return this.svc.update(id, req.body);
+  }
 
-    async edit(req: HttpRequest) {
-        const id = req.params?.id!;
-        return this.svc.get(id);
-    }
+  override async store(req: HttpRequest) {
+    return this.svc.create(req.body);
+  }
 
-    async update(req: HttpRequest) {
-        const id = req.params?.id!;
-        return this.svc.update(id, req.body);
-    }
+  override async delete(req: HttpRequest) {
+    const id = req.params?.id;
+    if (!id) return { ok: false, error: "BAD_REQUEST", message: "id is required" };
+    return this.svc.remove(id);
+  }
 
-    async store(req: HttpRequest) {
-        return this.svc.create(req.body);
-    }
+  override async print(req: HttpRequest) {
+    const id = req.params?.id;
+    if (!id) return { ok: false, error: "BAD_REQUEST", message: "id is required" };
+    const item = await this.svc.get(id);
+    if (!item) return { ok: false, error: "NOT_FOUND" };
+    return { printable: true, format: "pdf-ready", data: item };
+  }
 
-    async delete(req: HttpRequest) {
-        const id = req.params?.id!;
-        return this.svc.remove(id);
-    }
+  override async upload(req: HttpRequest) {
+    return this.svc.handleUpload(req.files, req.params);
+  }
 
-    async print(req: HttpRequest) {
-        // could return printable payload; adapter decides headers/content-type
-        const id = req.params?.id!;
-        const data = await this.svc.get(id);
-        return { printable: true, format: "pdf-ready", data };
-    }
-
-    async upload(req: HttpRequest) {
-        // expects req.files (adapter-populated)
-        return this.svc.handleUpload(req.files, req.params);
-    }
-
-    async download(req: HttpRequest) {
-        // return a descriptor your adapter can turn into a stream/attachment
-        const id = req.params?.id!;
-        const file = await this.svc.getExport(id);
-        return { download: true, filename: file.name, mime: file.mime, stream: file.stream };
-    }
+  override async download(req: HttpRequest) {
+    const id = req.params?.id;
+    if (!id) return { ok: false, error: "BAD_REQUEST", message: "id is required" };
+    const file = await this.svc.getExport(id);
+    return { download: true, filename: file.name, mime: file.mime, stream: file.stream };
+  }
 }

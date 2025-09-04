@@ -1,31 +1,51 @@
+// apps/cxsun/src/tenant/code/tenant.validator.ts
+
 import type { Tenant } from "./tenant.model";
 
-export class TenantValidator {
-  validateCreate(input: any): Omit<Tenant, "id" | "createdAt" | "updatedAt"> {
-    if (!input || typeof input !== "object") throw new Error("Invalid payload");
-    if (!input.name || typeof input.name !== "string") throw new Error("name is required");
-    if (!input.email || typeof input.email !== "string") throw new Error("email is required");
-    return {
-      name: input.name.trim(),
-      email: input.email.trim().toLowerCase(),
-      isActive: Boolean(input.isActive ?? false),
-    };
-  }
+export type ValidationResult<T = unknown> = { ok: true; value: T } | { ok: false; error: string };
 
-  validateUpdate(input: any): Partial<Pick<Tenant, "name" | "email" | "isActive">> {
-    if (!input || typeof input !== "object") throw new Error("Invalid payload");
-    const patch: Partial<Pick<Tenant, "name" | "email" | "isActive">> = {};
+function isNonEmptyString(v: unknown): v is string {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+export const TenantValidator = {
+  create(input: any): ValidationResult<Omit<Tenant, "id" | "createdAt" | "updatedAt">> {
+    if (!isNonEmptyString(input?.name)) {
+      return { ok: false, error: "name is required" };
+    }
+    if (input.email && typeof input.email !== "string") {
+      return { ok: false, error: "email must be a string" };
+    }
+    const status = input.status ?? "active";
+    if (status !== "active" && status !== "inactive") {
+      return { ok: false, error: "status must be 'active' or 'inactive'" };
+    }
+    return {
+      ok: true,
+      value: {
+        name: String(input.name).trim(),
+        email: input.email ? String(input.email).trim() : undefined,
+        status,
+      },
+    };
+  },
+
+  update(input: any): ValidationResult<Partial<Omit<Tenant, "id" | "createdAt" | "updatedAt">>> {
+    const out: any = {};
     if (input.name !== undefined) {
-      if (typeof input.name !== "string") throw new Error("name must be string");
-      patch.name = input.name.trim();
+      if (!isNonEmptyString(input.name)) return { ok: false, error: "name must be non-empty string" };
+      out.name = String(input.name).trim();
     }
     if (input.email !== undefined) {
-      if (typeof input.email !== "string") throw new Error("email must be string");
-      patch.email = input.email.trim().toLowerCase();
+      if (typeof input.email !== "string") return { ok: false, error: "email must be a string" };
+      out.email = String(input.email).trim();
     }
-    if (input.isActive !== undefined) {
-      patch.isActive = Boolean(input.isActive);
+    if (input.status !== undefined) {
+      if (input.status !== "active" && input.status !== "inactive") {
+        return { ok: false, error: "status must be 'active' or 'inactive'" };
+      }
+      out.status = input.status;
     }
-    return patch;
-  }
-}
+    return { ok: true, value: out };
+  },
+};

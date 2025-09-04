@@ -1,8 +1,12 @@
+// apps/cxsun/src/tenant/code/tenant.model.ts
+
+export type TenantID = string;
+
 export interface Tenant {
-  id: string;
+  id: TenantID;
   name: string;
-  email: string;
-  isActive: boolean;
-  createdAt: string; // ISO string for portability across engines
-  updatedAt: string;
+  email?: string;
+  status?: "active" | "inactive";
+  createdAt: string; // ISO
+  updatedAt: string; // ISO
 }

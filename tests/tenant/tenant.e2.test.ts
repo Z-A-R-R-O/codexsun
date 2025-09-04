@@ -1,6 +1,6 @@
 // apps/cxsun/tests/tenant.e2e.ts
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { tenantRoutes } from "../../apps/cxsun/src/tenant/code/tenant.api";
+import { tenantRoutes } from "../../apps/cxsun/src/tenant/code/tenant.routes";
 
 class MockRes {
     statusCode = 200;
