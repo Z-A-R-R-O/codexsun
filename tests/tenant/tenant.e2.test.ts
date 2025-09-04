@@ -1,6 +1,6 @@
 // apps/cxsun/tests/tenant.e2e.ts
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { tenantRouteProvider } from "../../apps/cxsun/src/tenant/code/tenant.api";
+import { tenantRoutes } from "../../apps/cxsun/src/tenant/code/tenant.api";
 
 class MockRes {
     statusCode = 200;
@@ -43,7 +43,7 @@ function mockReq(): Partial<IncomingMessage> {
 }
 
 export async function tenantE2E() {
-    const routes = await tenantRouteProvider();
+    const routes = await tenantRoutes();
     const r = routes.find(rt =>
         rt.method === "GET" &&
         (typeof rt.path === "string" ? rt.path === "/api/tenants" : (rt.path as RegExp).test("/api/tenants"))
