@@ -1,5 +1,5 @@
 // queryAdapter.ts — Simple DB adapter on top of mdb
-import { mdb } from "../database/db";
+import { mdb } from "../../database/db";
 
 export const queryAdapter = {
     async findOne(table: string, where: Record<string, any>): Promise<any | null> {

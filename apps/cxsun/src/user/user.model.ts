@@ -1,6 +1,6 @@
-import { Model } from "../../../../cortex/core/model";
+import { Model } from "../../../../cortex/core/old/model";
 import {PrimaryKey, Email as EmailType, Str, Bool, DateTime, SoftDelete} from "../../../../cortex/core/types";
-import { PrimaryKey as PK, Email, String, BooleanCol, DateTime as DateTimeCol, SoftDeleteCol } from "../../../../cortex/core/decorators";
+import { PrimaryKey as PK, Email, String, BooleanCol, DateTime as DateTimeCol, SoftDeleteCol } from "../../../../cortex/core/old/decorators";
 
 export class User extends Model {
     public static table = "users";

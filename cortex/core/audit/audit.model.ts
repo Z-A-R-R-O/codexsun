@@ -1,7 +1,7 @@
 // cortex/core/audit.model.ts
 
-import { Model } from "../model";
-import { Table, Column } from "../decorators";
+import { Model } from "../old/model";
+import { Table, Column } from "../old/decorators";
 
 @Table("audit_logs")
 export class AuditLog extends Model {

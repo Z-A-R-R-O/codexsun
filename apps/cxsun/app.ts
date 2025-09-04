@@ -1,5 +1,5 @@
 import type { RouteRegistery, RouteProvider } from '../../cortex/http/route_registery';
-import { tenantRouteProvider } from './src/tenant/tenant.api';
+import { tenantRouteProvider } from './src/tenant/code/tenant.api';
 // import { json } from '../../cortex/http/chttpx';
 
 // Simple test provider to verify this app is mounted correctly

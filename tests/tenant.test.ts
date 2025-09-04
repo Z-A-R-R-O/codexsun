@@ -1,7 +1,7 @@
 // tenant.test.ts — Node.js native test runner
 import test, { before, after } from "node:test";
 import assert from "node:assert";
-import { Tenant } from "../apps/cxsun/src/tenant/tenant.model";
+import { Tenant } from "../apps/cxsun/src/tenant/code/tenant.model";
 import { AuditLog } from "../cortex/core/audit/audit.model";
 import { DbRefresh } from "./DbRefresh";
 
