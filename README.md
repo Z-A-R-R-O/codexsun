@@ -7,6 +7,11 @@ Minimal monorepo with a single starter app: **cxsun**.
 - Node.js ≥ 18
 - pnpm (Corepack: `corepack enable && corepack prepare pnpm@latest --activate`)
 
+# install pnpm globally - Performant Node Package Manager
+```
+npm install -g pnpm
+```
+
 ## Install
 From the repo root:
 ```
