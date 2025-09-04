@@ -31,3 +31,7 @@ pnpm add -D tailwindcss -w
 
 
 pnpm add -D reflect-metadata -w
+
+
+grep -R "const mdb" cortex/database to find dupicates
+
