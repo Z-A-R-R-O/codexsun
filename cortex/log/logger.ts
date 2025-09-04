@@ -1,4 +1,4 @@
-// cortex/log/logger.ts — robust console logger + optional file sink
+// cortex/log/logger.ts
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -15,22 +15,14 @@ const EMOJI: Record<string, string> = {
 const LEVEL_NUM: Record<LogLevel, number> = { trace: 10, debug: 20, info: 30, warn: 40, error: 50, fatal: 60 };
 
 export interface AccessLogRecord {
-    ts?: string;
-    method?: string;
-    url?: string;
-    path?: string;
-    status?: number;
-    duration_ms?: number;
-    bytes?: number;
-    ip?: string;
-    ua?: string;
-    msg?: string;
+    ts?: string; method?: string; url?: string; path?: string; status?: number; duration_ms?: number;
+    bytes?: number; ip?: string; ua?: string; msg?: string;
 }
 
 export interface LoggerOptions {
     name?: string;
     level?: LogLevel;
-    layout?: Layout;                 // console format (default from env)
+    layout?: Layout;                 // console format
     json?: boolean;                  // back-compat: overrides layout if provided
     emoji?: boolean;
     color?: boolean;
@@ -48,21 +40,21 @@ export interface LoggerOptions {
 export interface Logger {
     level: LogLevel;
     options(): Readonly<LoggerOptions>;
-
     trace(msg: string, ctx?: Record<string, unknown>): void;
     debug(msg: string, ctx?: Record<string, unknown>): void;
     info(msg: string, ctx?: Record<string, unknown>): void;
     warn(msg: string, ctx?: Record<string, unknown>): void;
     error(msg: string | Error, ctx?: Record<string, unknown>): void;
     fatal(msg: string | Error, ctx?: Record<string, unknown>): void;
-
     success(msg: string, ctx?: Record<string, unknown>): void;
     start(msg: string, ctx?: Record<string, unknown>): void;
     stop(msg: string, ctx?: Record<string, unknown>): void;
-
-    /** Accepts either AccessLogRecord OR (message, ctx) for compatibility */
     access(rec: AccessLogRecord | string, ctx?: Record<string, unknown>): void;
 }
+
+// ---- internals ----
+type InternalFile = false | { path: string; append: boolean; format: Layout };
+type InternalOptions = Required<Omit<LoggerOptions, "file">> & { file: InternalFile };
 
 const pickTTY = () => process.stdout?.isTTY ?? false;
 const nowISO = () => new Date().toISOString();
@@ -97,39 +89,6 @@ function colorFn(level: LogLevel) {
     }
 }
 
-function ensureDirFor(filePath?: string) {
-    if (!filePath) return; // ← safe: no-op when disabled/undefined
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-function makeFileSink(targetPath?: string, append = true) {
-    if (!targetPath) {
-        // disabled sink (no file path)
-        return { write: (_line: string) => {} };
-    }
-    ensureDirFor(targetPath);
-    let stream: fs.WriteStream | undefined;
-
-    const open = () => {
-        stream = fs.createWriteStream(targetPath, { flags: append ? "a" : "w" });
-        stream.on("error", () => { try { stream?.destroy(); } catch {} setTimeout(open, 250); });
-    };
-    open();
-
-    return {
-        write(line: string) {
-            try {
-                // If stream died, try to reopen quickly
-                if (!stream || (stream as any).destroyed) open();
-                stream!.write(line + "\n");
-            } catch {
-                // swallow file errors
-            }
-        }
-    };
-}
-
 function redactObj(obj: Record<string, unknown> | undefined, redact?: string[]) {
     if (!obj || !redact?.length) return obj;
     const out: Record<string, unknown> = {};
@@ -137,63 +96,65 @@ function redactObj(obj: Record<string, unknown> | undefined, redact?: string[]) 
     return out;
 }
 
+function makeFileSink(filePath: string, append: boolean) {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const stream = fs.createWriteStream(filePath, { flags: append ? "a" : "w" });
+    stream.on("error", () => { try { stream?.destroy(); } catch {} });
+    return { write(line: string) { try { stream.write(line + "\n"); } catch {} } };
+}
+
 export function makeLogger(opts: LoggerOptions = {}): Logger {
     const layout: Layout =
         typeof opts.json === "boolean" ? (opts.json ? "json" : "text") : (opts.layout ?? layoutFromEnv());
 
-    const base = {
-        name: opts.name ?? "server",
+
+    const jsonFlag = typeof opts.json === "boolean" ? opts.json : (layout === "json");
+
+    const defaultFile: InternalFile =
+        opts.file === false
+            ? false
+            : {
+                path: (opts.file?.path) || (process.env.LOG_FILE_PATH || path.resolve(process.cwd(), "storage", "framework", "log.txt")),
+                append: opts.file?.append !== false,
+                format: (opts.file?.format) ?? ((process.env.LOG_FILE_FORMAT === "json" ? "json" : "text") as Layout),
+            };
+
+    const base: InternalOptions = {
+        name: opts.name ?? (process.env.APP_NAME || "CodexSun"),
         level: opts.level ?? levelFromEnv(),
         layout,
+        json: jsonFlag,
         emoji: opts.emoji ?? true,
         color: opts.color ?? pickTTY(),
         time: opts.time ?? "iso",
         console: opts.console ?? true,
-        file: (() => {
-            if (opts.file === false) return false;
-            const defPath = process.env.LOG_FILE_PATH || path.resolve(process.cwd(), "storage", "framework", "log.txt");
-            const given = opts.file ?? {};
-            return {
-                path: given.path || defPath,                  // ← always a string here
-                append: given.append !== false,
-                format: given.format || layout,
-            };
-        })(),
+        file: defaultFile,
         context: opts.context ?? {},
         includePid: opts.includePid ?? true,
         includeHostname: opts.includeHostname ?? true,
         redact: opts.redact ?? ["password", "token", "secret"],
         sampler: opts.sampler ?? (() => true),
-    } as Required<Omit<LoggerOptions, "file">> & { file: LoggerOptions["file"] | { path: string; append: boolean; format: Layout } };
+    };
 
-    // sinks
-    const fileSink = base.file ? makeFileSink((base.file as any).path, (base.file as any).append) : undefined;
-    const fileFormat: Layout = base.file ? (base.file as any).format : base.layout;
-
-    const app = (base.context as any).app || process.env.APP_NAME || "App";
-    const host = base.includeHostname ? os.hostname() : undefined;
-    const pid = base.includePid ? process.pid : undefined;
+    const fileSink = base.file ? makeFileSink(base.file.path, base.file.append) : undefined;
 
     function fmt(level: LogLevel, msg: string, ctx?: Record<string, unknown>) {
         const t = base.time === "iso" ? nowISO() : base.time === "epoch" ? String(Date.now()) : undefined;
-        const body = {
-            t, app, host, pid, name: base.name, level,
-            msg, ...(ctx ? redactObj(ctx, base.redact) : {}),
-        };
-
-        if (base.layout === "json") {
-            return JSON.stringify(body);
-        }
-
         const cf = colorFn(level);
-        const icon = base.emoji ? (EMOJI[level] || "") + " " : "";
-        const head = [
-            icon + (t ? `${t} ` : ""),
-            app ? `${app} ` : "",
-            `${level.toUpperCase()}:`,
-        ].join("");
+
+        // ✅ show green check for success-tagged info logs
+        const icon = base.emoji
+            ? (((ctx as any)?.__success ? EMOJI.success : (EMOJI[level] || "")) + " ")
+            : "";
+
+        const head =
+            (t ? `${t} ` : "") +
+            (base.name ? `${base.name} ` : "") +
+            `${level.toUpperCase()}:`;
+
         const tail = ctx && Object.keys(ctx).length ? " " + JSON.stringify(redactObj(ctx, base.redact)) : "";
-        return (base.color ? cf(head) : head) + " " + msg + tail;
+        return (base.color ? cf(icon + head) : icon + head) + " " + msg + tail;
     }
 
     function write(level: LogLevel, msg: string, ctx?: Record<string, unknown>) {
@@ -206,30 +167,37 @@ export function makeLogger(opts: LoggerOptions = {}): Logger {
             fn(line);
         }
         if (fileSink) {
-            const fileLine = fileFormat === "json" ? JSON.stringify({ ...JSON.parse(line), type: "log" }) : line;
-            fileSink.write(fileLine);
+            const out = base.layout === "json"
+                ? JSON.stringify({ t: nowISO(), name: base.name, level, msg, ...(ctx ? redactObj(ctx, base.redact) : {}) })
+                : line;
+            fileSink.write(out);
         }
-    }
-
-    function writeAccess(rec: AccessLogRecord | string, extra?: Record<string, unknown>) {
-        if (typeof rec === "string") {
-            // compatibility: access("METHOD /path?x", { ip, ua, ms })
-            return write("info", rec, extra);
-        }
-        const data: AccessLogRecord = { ts: rec.ts || nowISO(), ...rec };
-        const line =
-            base.layout === "json"
-                ? JSON.stringify({ type: "access", app, host, pid, name: base.name, ...data })
-                : `${base.emoji ? EMOJI.access + " " : ""}${data.ts} ${app} ACCESS: ${data.method || ""} ${data.path || data.url || ""} ${data.status ?? ""} ${data.duration_ms ?? ""}ms`;
-        if (base.console) console.log(line);
-        if (fileSink) fileSink.write(line);
     }
 
     return {
         get level() { return base.level; },
         set level(v: LogLevel) { (base as any).level = v; },
 
-        options() { return Object.freeze({ ...base, file: base.file }); },
+        options(): Readonly<LoggerOptions> {
+            const file: LoggerOptions["file"] =
+                base.file === false ? false : { path: base.file.path, append: base.file.append, format: base.file.format };
+            // return exactly LoggerOptions shape (no booleans except 'false')
+            return Object.freeze({
+                name: base.name,
+                level: base.level,
+                layout: base.layout,
+                emoji: base.emoji,
+                color: base.color,
+                time: base.time,
+                console: base.console,
+                file,
+                context: base.context,
+                includePid: base.includePid,
+                includeHostname: base.includeHostname,
+                redact: base.redact,
+                sampler: base.sampler,
+            });
+        },
 
         trace: (m, c) => write("trace", m, c),
         debug: (m, c) => write("debug", m, c),
@@ -238,37 +206,20 @@ export function makeLogger(opts: LoggerOptions = {}): Logger {
         error: (m, c) => write("error", m instanceof Error ? m.message : m, m instanceof Error ? { ...(c||{}), err: { name: m.name, message: m.message, stack: m.stack } } : c),
         fatal: (m, c) => write("fatal", m instanceof Error ? m.message : m, m instanceof Error ? { ...(c||{}), err: { name: m.name, message: m.message, stack: m.stack } } : c),
 
-        success: (m, c) => write("info",  m, { ...(c||{}), ok: true }),
-        start:   (m, c) => write("info",  m, { ...(c||{}), phase: "start" }),
-        stop:    (m, c) => write("info",  m, { ...(c||{}), phase: "stop" }),
+        // success -> info level, but tagged so fmt() shows ✅
+        success: (m, c) => write("info", m, { ...(c||{}), ok: true, __success: true }),
+        start:   (m, c) => write("info", m, { ...(c||{}), phase: "start" }),
+        stop:    (m, c) => write("info", m, { ...(c||{}), phase: "stop" }),
 
-        access: writeAccess,
+        access(rec: AccessLogRecord | string, extra?: Record<string, unknown>) {
+            if (typeof rec === "string") return write("info", rec, extra);
+            const data: AccessLogRecord = { ts: rec.ts || nowISO(), ...rec };
+            const line = `${base.emoji ? EMOJI.access + " " : ""}${data.ts} ${base.name} ACCESS: ${data.method || ""} ${data.path || data.url || ""} ${data.status ?? ""} ${data.duration_ms ?? ""}ms`;
+            if (base.console) console.log(line);
+            if (fileSink) fileSink.write(line);
+        },
     };
 }
 
-// Backwards-compatible factory
-export function createServerLogger(options: Partial<LoggerOptions> = {}): Logger {
-    return makeLogger({
-        name: options.name ?? "server",
-        emoji: options.emoji ?? true,
-        layout: options.layout ?? (typeof options.json === "boolean" ? (options.json ? "json" : "text") : undefined),
-        color: options.color,
-        level: options.level ?? levelFromEnv(),
-        time: options.time ?? "iso",
-        console: options.console ?? true,
-        // Default the file path if not provided, but allow disabling via file:false
-        file: options.file === false ? false : (options.file ?? {
-            path: process.env.LOG_FILE_PATH || path.resolve(process.cwd(), "storage", "framework", "log.txt"),
-            append: true,
-            format: (process.env.LOG_FILE_FORMAT === "json" ? "json" : "text") as Layout,
-        }),
-        includePid: options.includePid ?? true,
-        includeHostname: options.includeHostname ?? true,
-        redact: options.redact ?? ["password", "token", "secret"],
-        context: { app: process.env.APP_NAME || "CodexSun", version: process.env.APP_VERSION || "1.0.0", ...(options.context || {}) },
-        sampler: options.sampler,
-    });
-}
-
-// Optional shorthand
-export const createLogger = createServerLogger;
+// Shorthand
+export const createLogger = makeLogger;
