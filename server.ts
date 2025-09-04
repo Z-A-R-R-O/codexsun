@@ -29,8 +29,8 @@ registry.addProvider(health.routes);
 async function main() {
     try {
         // ✅ Initialize master DB
-        // await initDb();
-        // logger.info("✅ Master DB initialized and core schema ready");
+        await initDb();
+        logger.info("✅ Master DB initialized and core schema ready");
 
         // 3) load all apps discovered by cortex/main.ts
         await registerApps(registry);
