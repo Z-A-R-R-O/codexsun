@@ -1,13 +1,17 @@
 // cortex/database/core_table.ts
 // Master (shared) DB core tables & APIs with uniform `id` primary keys.
-// Creation order: tenants -> features -> plans -> subscriptions -> app_settings -> activations
+// Creation order: __core_meta -> tenants -> features -> plans -> subscriptions -> app_settings -> activations
 //
-// Adds is_active to all tables
-// Enforces FK constraints + FK check at boot
+// - Adds is_active to all tables
+// - Enforces FK constraints + FK check at boot
+// - Seeds default tenant, feature, plan, subscription, app settings
+// - Tracks migrations in __core_meta with SHA1 hash, version, status, rollback protection
+//
 // Uses the master profile ("default") via connection_manager.
 
 import * as cm from "./connection_manager";
 import type { Engine } from "./Engine";
+import crypto from "node:crypto";
 
 /* ------------------------------------------------------------------------------------------------
  * Helpers
@@ -19,20 +23,8 @@ function genId(): string {
     return `${ts}${rnd}`;
 }
 
-async function ensureColumn(engine: Engine, table: string, column: string, typeSql: string): Promise<void> {
-    const cols = await engine.fetchAll<{ name: string }>(`PRAGMA table_info(${table})`);
-    const has = cols.some((c: { name: string }) => c.name === column);
-    if (!has) {
-        await engine.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${typeSql};`);
-    }
-}
-
-async function ensureUnique(engine: Engine, table: string, idxName: string, expr: string): Promise<void> {
-    await engine.execute(`CREATE UNIQUE INDEX IF NOT EXISTS ${idxName} ON ${table}(${expr});`);
-}
-
-async function ensureIndex(engine: Engine, table: string, idxName: string, expr: string): Promise<void> {
-    await engine.execute(`CREATE INDEX IF NOT EXISTS ${idxName} ON ${table}(${expr});`);
+function sha1(input: string): string {
+    return crypto.createHash("sha1").update(input).digest("hex");
 }
 
 async function backfillIds(engine: Engine, table: string, idCol = "id"): Promise<void> {
@@ -45,15 +37,65 @@ async function backfillIds(engine: Engine, table: string, idCol = "id"): Promise
     }
 }
 
+async function recordMeta(
+    engine: Engine,
+    name: string,
+    ddl: string,
+    protectedCore = true
+): Promise<void> {
+    const hash = sha1(ddl);
+    await engine.execute(
+        `INSERT INTO __core_meta (id, name, version, hash, status, protected, installed_at)
+         VALUES (?, ?, '1.0', ?, 'applied', ?, datetime('now'))
+         ON CONFLICT(name) DO UPDATE SET
+            version = '1.0',
+            hash = excluded.hash,
+            status = 'applied',
+            protected = excluded.protected,
+            installed_at = datetime('now')`,
+        [genId(), name, hash, protectedCore ? 1 : 0]
+    );
+}
+
+async function protectRollback(engine: Engine, table: string): Promise<void> {
+    const row = await engine.fetchOne<{ protected: number }>(
+        `SELECT protected FROM __core_meta WHERE name = ?`,
+        [table]
+    );
+    if (row?.protected === 1) {
+        throw new Error(`Rollback prevented: ${table} is a protected core table.`);
+    }
+}
+
 /* ------------------------------------------------------------------------------------------------
- * Ensure DDL (in required order)
+ * Ensure DDL
  * ---------------------------------------------------------------------------------------------- */
 
 let ensured = false;
 
+/* ------------------------------ __core_meta ------------------------------ */
+async function ensureCoreMeta(): Promise<void> {
+    const db = await cm.prepareEngine("default");
+    const ddl = `
+        CREATE TABLE IF NOT EXISTS __core_meta (
+            id             TEXT PRIMARY KEY,
+            name           TEXT UNIQUE NOT NULL,
+            version        TEXT,
+            hash           TEXT,
+            status         TEXT,
+            protected      INTEGER DEFAULT 1,
+            installed_at   TEXT DEFAULT (datetime('now')),
+            rolled_back_at TEXT
+        );
+    `;
+    await db.execute(ddl);
+    await recordMeta(db, "__core_meta", ddl, true);
+}
+
+/* ------------------------------ tenants ------------------------------ */
 async function ensureTenants(): Promise<void> {
     const db = await cm.prepareEngine("default");
-    await db.execute(`
+    const ddl = `
         CREATE TABLE IF NOT EXISTS tenants (
             tenant_id TEXT PRIMARY KEY,
             driver TEXT NOT NULL CHECK (driver IN ('postgres','mysql','mariadb','sqlite','mongodb')),
@@ -66,17 +108,44 @@ async function ensureTenants(): Promise<void> {
             pool_max INTEGER,
             pool_idle_ms INTEGER,
             pool_acquire_timeout_ms INTEGER,
-            meta_json TEXT,
             is_active INTEGER DEFAULT 1,
             updated_at TEXT DEFAULT (datetime('now'))
         );
-    `);
-    await ensureIndex(db, "tenants", "ix_tenants_active", "is_active");
+    `;
+    await db.execute(ddl);
+
+    // Seed default tenant
+    const driver = process.env.DB_DRIVER ?? "sqlite";
+    const host = process.env.DB_HOST ?? null;
+    const port = process.env.DB_PORT ? Number(process.env.DB_PORT) : null;
+    const dbName = process.env.DB_NAME ?? "codexsun_db";
+    const ssl = process.env.DB_SSL === "true" ? 1 : 0;
+    const user = process.env.DB_USER ?? null;
+    const pass = process.env.DB_PASS ?? null;
+    const params = JSON.stringify({ user, pass });
+
+    await db.execute(
+        `INSERT INTO tenants (tenant_id, driver, host, port, db_name, ssl, params_json, is_active, updated_at)
+         VALUES ('default', ?, ?, ?, ?, ?, ?, 1, datetime('now'))
+         ON CONFLICT(tenant_id) DO UPDATE SET
+             driver = excluded.driver,
+             host = excluded.host,
+             port = excluded.port,
+             db_name = excluded.db_name,
+             ssl = excluded.ssl,
+             params_json = excluded.params_json,
+             is_active = 1,
+             updated_at = datetime('now')`,
+        [driver, host, port, dbName, ssl, params]
+    );
+
+    await recordMeta(db, "tenants", ddl, true);
 }
 
+/* ------------------------------ features ------------------------------ */
 async function ensureFeatures(): Promise<void> {
     const db = await cm.prepareEngine("default");
-    await db.execute(`
+    const ddl = `
         CREATE TABLE IF NOT EXISTS features (
             id          TEXT PRIMARY KEY,
             feature_id  TEXT UNIQUE,
@@ -86,15 +155,27 @@ async function ensureFeatures(): Promise<void> {
             is_active   INTEGER DEFAULT 1,
             updated_at  TEXT DEFAULT (datetime('now'))
         );
-    `);
-    await ensureUnique(db, "features", "ux_features_feature_id", "feature_id");
-    await ensureIndex(db, "features", "ix_features_active", "is_active");
+    `;
+    await db.execute(ddl);
     await backfillIds(db, "features", "id");
+
+    // Seed default core feature
+    const count = await db.fetchOne<{ count: number }>("SELECT COUNT(*) as count FROM features");
+    if (count?.count === 0) {
+        await db.execute(
+            `INSERT INTO features (id, feature_id, name, description, meta_json, is_active, updated_at)
+             VALUES (?, 'core', 'Core Feature', 'Default core feature', '{}', 1, datetime('now'))`,
+            [genId()]
+        );
+    }
+
+    await recordMeta(db, "features", ddl, true);
 }
 
+/* ------------------------------ plans ------------------------------ */
 async function ensurePlans(): Promise<void> {
     const db = await cm.prepareEngine("default");
-    await db.execute(`
+    const ddl = `
         CREATE TABLE IF NOT EXISTS plans (
             id          TEXT PRIMARY KEY,
             plan_id     TEXT UNIQUE,
@@ -106,16 +187,29 @@ async function ensurePlans(): Promise<void> {
             updated_at  TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (features_id) REFERENCES features(id)
         );
-    `);
-    await ensureUnique(db, "plans", "ux_plans_plan_id", "plan_id");
-    await ensureIndex(db, "plans", "ix_plans_active", "is_active");
-    await ensureIndex(db, "plans", "ix_plans_features_id", "features_id");
+    `;
+    await db.execute(ddl);
     await backfillIds(db, "plans", "id");
+
+    // Seed default free plan
+    const count = await db.fetchOne<{ count: number }>("SELECT COUNT(*) as count FROM plans");
+    if (count?.count === 0) {
+        await db.execute(
+            `INSERT INTO plans (id, plan_id, name, description, features_id, meta_json, is_active, updated_at)
+             VALUES (?, 'free', 'Free Plan', 'Default starter plan',
+                     (SELECT id FROM features WHERE feature_id='core'),
+                     '{}', 1, datetime('now'))`,
+            [genId()]
+        );
+    }
+
+    await recordMeta(db, "plans", ddl, true);
 }
 
+/* ------------------------------ subscriptions ------------------------------ */
 async function ensureSubscriptions(): Promise<void> {
     const db = await cm.prepareEngine("default");
-    await db.execute(`
+    const ddl = `
         CREATE TABLE IF NOT EXISTS subscriptions (
             id            TEXT PRIMARY KEY,
             tenant_id     TEXT UNIQUE,
@@ -131,17 +225,29 @@ async function ensureSubscriptions(): Promise<void> {
             FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id),
             FOREIGN KEY (plan_id)   REFERENCES plans(id)
         );
-    `);
-    await ensureUnique(db, "subscriptions", "ux_subs_tenant", "tenant_id");
-    await ensureIndex(db, "subscriptions", "ix_subs_status", "status");
-    await ensureIndex(db, "subscriptions", "ix_subs_plan_id", "plan_id");
-    await ensureIndex(db, "subscriptions", "ix_subs_active", "is_active");
+    `;
+    await db.execute(ddl);
     await backfillIds(db, "subscriptions", "id");
+
+    // Seed default subscription
+    const count = await db.fetchOne<{ count: number }>("SELECT COUNT(*) as count FROM subscriptions");
+    if (count?.count === 0) {
+        await db.execute(
+            `INSERT INTO subscriptions (id, tenant_id, plan_id, plan, status, is_active, updated_at)
+             VALUES (?, 'default',
+                     (SELECT id FROM plans WHERE plan_id='free'),
+                     'Free Plan', 'active', 1, datetime('now'))`,
+            [genId()]
+        );
+    }
+
+    await recordMeta(db, "subscriptions", ddl, true);
 }
 
+/* ------------------------------ app_settings ------------------------------ */
 async function ensureAppSettings(): Promise<void> {
     const db = await cm.prepareEngine("default");
-    await db.execute(`
+    const ddl = `
         CREATE TABLE IF NOT EXISTS app_settings (
             id          TEXT PRIMARY KEY,
             key         TEXT UNIQUE,
@@ -150,15 +256,32 @@ async function ensureAppSettings(): Promise<void> {
             is_active   INTEGER DEFAULT 1,
             updated_at  TEXT DEFAULT (datetime('now'))
         );
-    `);
-    await ensureUnique(db, "app_settings", "ux_app_settings_key", "key");
-    await ensureIndex(db, "app_settings", "ix_app_settings_active", "is_active");
+    `;
+    await db.execute(ddl);
     await backfillIds(db, "app_settings", "id");
+
+    // Seed defaults
+    const count = await db.fetchOne<{ count: number }>("SELECT COUNT(*) as count FROM app_settings");
+    if (count?.count === 0) {
+        await db.execute(
+            `INSERT INTO app_settings (id, key, value_text, is_active, updated_at)
+             VALUES (?, 'app_code', ?, 1, datetime('now'))`,
+            [genId(), process.env.APP_NAME ?? "CodexSun"]
+        );
+        await db.execute(
+            `INSERT INTO app_settings (id, key, value_text, is_active, updated_at)
+             VALUES (?, 'app_version', ?, 1, datetime('now'))`,
+            [genId(), process.env.APP_VERSION ?? "0.0.0"]
+        );
+    }
+
+    await recordMeta(db, "app_settings", ddl, true);
 }
 
+/* ------------------------------ activations ------------------------------ */
 async function ensureActivations(): Promise<void> {
     const db = await cm.prepareEngine("default");
-    await db.execute(`
+    const ddl = `
         CREATE TABLE IF NOT EXISTS activations (
             id             TEXT PRIMARY KEY,
             activation_key TEXT UNIQUE
@@ -176,15 +299,15 @@ async function ensureActivations(): Promise<void> {
             is_active      INTEGER DEFAULT 1,
             FOREIGN KEY (tenant_id) REFERENCES tenants(tenant_id)
         );
-    `);
-    await ensureIndex(db, "activations", "ix_act_status", "status");
-    await ensureIndex(db, "activations", "ix_act_tenant", "tenant_id");
-    await ensureIndex(db, "activations", "ix_act_active", "is_active");
+    `;
+    await db.execute(ddl);
     await backfillIds(db, "activations", "id");
+
+    await recordMeta(db, "activations", ddl, true);
 }
 
 /* ------------------------------------------------------------------------------------------------
- * Public: ensure everything (safe to call many times)
+ * Public: ensure everything
  * ---------------------------------------------------------------------------------------------- */
 
 export async function run(): Promise<void> {
@@ -195,9 +318,10 @@ export async function run(): Promise<void> {
     try {
         await db.execute("PRAGMA foreign_keys = ON");
     } catch {
-        // no-op for non-SQLite drivers
+        // ignore for non-SQLite
     }
 
+    await ensureCoreMeta();
     await ensureTenants();
     await ensureFeatures();
     await ensurePlans();
@@ -205,7 +329,7 @@ export async function run(): Promise<void> {
     await ensureAppSettings();
     await ensureActivations();
 
-    // Run foreign key check (SQLite only; others throw if inconsistent)
+    // Foreign key check (SQLite only)
     try {
         const fkErrors = await db.fetchAll<any>("PRAGMA foreign_key_check");
         if (fkErrors.length > 0) {
