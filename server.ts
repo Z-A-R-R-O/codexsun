@@ -1,6 +1,6 @@
 import "dotenv/config";
 import path from "node:path";
-import { createServerLogger } from "./cortex/log/logger";
+import { createLogger  } from "./cortex/log/logger";
 import { bootAll } from "./cortex/http/serve_all";
 import { registerApps } from "./cortex/main";
 import { RouteRegistery } from "./cortex/http/route_registery";
@@ -13,7 +13,7 @@ import * as welcome from "./cortex/http/routes/welcome";
 import * as health from "./cortex/http/routes/health";
 import { initDb } from "./cortex/database/db"; // ✅ use initDb
 
-const logger = createServerLogger({
+const logger = createLogger ({
     file: {
         path: process.env.LOG_FILE_PATH || path.resolve(process.cwd(), "storage", "framework", "log.txt"),
         append: true,
