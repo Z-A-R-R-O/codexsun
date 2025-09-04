@@ -2,6 +2,7 @@ import "dotenv/config";
 import path from "node:path";
 import { createServerLogger } from "./cortex/log/logger";
 import { bootAll } from "./cortex/http/serve_all";
+import { registerApps } from "./cortex/main";
 import { RouteRegistery } from "./cortex/http/route_registery";
 
 import { createSessionMiddleware } from "./cortex/http/middleware/session";
@@ -28,8 +29,11 @@ registry.addProvider(health.routes);
 async function main() {
     try {
         // ✅ Initialize master DB
-        await initDb();
-        logger.info("✅ Master DB initialized and core schema ready");
+        // await initDb();
+        // logger.info("✅ Master DB initialized and core schema ready");
+
+        // 3) load all apps discovered by cortex/main.ts
+        await registerApps(registry);
 
         // Boot servers
         await bootAll({
