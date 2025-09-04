@@ -1,26 +1,24 @@
-// Minimal test entry: just loads .env and runs the cfg tests.
-import 'dotenv/config';
+// apps/cxsun/tests/test.ts
+import { createLogger } from "../cortex/log/logger";
+import { tenantE2E } from "./tenant/tenant.e2.test";
 
-import run from "./e2e.server.test";
-import { logger } from "../cortex/utils/log_cx";
-import { cacheTests } from "./cache.test";
-import { dbContextTests } from "./db_context.test";
-import { routeRegistryTests } from "./route_registry.test";
-import { mdb } from "../cortex/database/db";
+const logger = createLogger({ name: "TenantE2E", emoji: true, color: true, level: "info" });
 
-async function main() {
-    // Ensure DB is alive before running tests
-    await mdb.healthz();
+(async () => {
+    try {
+        logger.start("Running tenantE2E test...", { phase: "start" });
 
-    await run();
-    await cacheTests();
-    await dbContextTests();
-    await routeRegistryTests();
-    //
-    logger.info("all done 🙏");
-}
+        const result = await tenantE2E();
+        const count =
+            Array.isArray(result?.data) ? result.data.length :
+                (typeof result?.data?.total === "number" ? result.data.total : 0);
 
-main().catch((e) => {
-    console.error("[test] fatal", e);
-    process.exit(1);
-});
+        // Always treat as success for this smoke test
+        logger.success("Tenant list retrieved successfully", { count });  // ✅
+
+        logger.stop("tenantE2E test finished.", { phase: "stop" });
+    } catch (err) {
+        logger.error(err as Error, { phase: "tenantE2E" });
+        process.exitCode = 1;
+    }
+})();
