@@ -11,6 +11,7 @@ export interface ColumnOptions {
     type?: string;
     nullable?: boolean;
     default?: any;
+    unique?: boolean;
 }
 
 /* ───────────────
