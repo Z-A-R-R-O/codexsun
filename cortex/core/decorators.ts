@@ -1,32 +1,48 @@
+// decorators.ts — Legacy (experimentalDecorators) decorators
 import "reflect-metadata";
-import { Schema } from "./schema";
-import { ColumnType } from "./types";
 
-const SCHEMA_KEY = Symbol("schema");
+const META_KEY = {
+    table: Symbol("table"),
+    columns: Symbol("columns"),
+};
 
-function addColumn(target: any, propertyKey: string, type: ColumnType) {
-    let schema: Schema = Reflect.getMetadata(SCHEMA_KEY, target.constructor) || new Schema();
-
-    const tsType = Reflect.getMetadata("design:type", target, propertyKey);
-
-    schema.addColumn({
-        name: propertyKey,
-        type,
-        tsType: tsType?.name || "unknown",
-    });
-
-    Reflect.defineMetadata(SCHEMA_KEY, schema, target.constructor);
+export interface ColumnOptions {
+    primary?: boolean;
+    type?: string;
+    nullable?: boolean;
+    default?: any;
 }
 
-export function Column(type: ColumnType) {
-    return function (target: any, propertyKey: string) {
-        addColumn(target, propertyKey, type);
+/* ───────────────
+ * @Table(name)
+ * ─────────────── */
+export function Table(name: string): ClassDecorator {
+    return (target: Function) => {
+        Reflect.defineMetadata(META_KEY.table, name, target);
     };
 }
 
-export function PrimaryKey() { return Column(ColumnType.Primary); }
-export function Email() { return Column(ColumnType.Email); }
-export function String() { return Column(ColumnType.String); }
-export function BooleanCol() { return Column(ColumnType.Boolean); }
-export function DateTime() { return Column(ColumnType.DateTime); }
-export function SoftDeleteCol() { return Column(ColumnType.SoftDelete); } // 🔥
+/* ───────────────
+ * @Column(options)
+ * ─────────────── */
+export function Column(options: ColumnOptions = {}): PropertyDecorator {
+    return (target: Object, propertyKey: string | symbol) => {
+        if (!target) return;
+        const ctor = (target as any).constructor;
+        const columns: Record<string, ColumnOptions> =
+            Reflect.getMetadata(META_KEY.columns, ctor) || {};
+        columns[String(propertyKey)] = options;
+        Reflect.defineMetadata(META_KEY.columns, columns, ctor);
+    };
+}
+
+/* ───────────────
+ * Helpers
+ * ─────────────── */
+export function getTableName(target: any): string {
+    return Reflect.getMetadata(META_KEY.table, target) || target.table;
+}
+
+export function getSchema(target: any): Record<string, ColumnOptions> {
+    return Reflect.getMetadata(META_KEY.columns, target) || {};
+}
