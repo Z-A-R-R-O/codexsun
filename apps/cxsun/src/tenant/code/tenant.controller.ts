@@ -1,45 +1,64 @@
 // apps/cxsun/src/tenant/code/tenant.controller.ts
-import { ok, serverError } from "../../../../../cortex/http/respond";
+import type { HttpRequest } from "../../../../../cortex/http/types";
+import { AbstractController } from "../../../../../cortex/http/controller/base.controller";
 import { TenantService } from "./tenant.service";
 
-// Make index an arrow method so `this` stays bound when passed to router.
-export class TenantController {
+export class TenantController extends AbstractController {
     private svc: TenantService;
 
     constructor(namespace = "default") {
+        super();
         this.svc = new TenantService(namespace);
     }
-// arrow keeps `this` bound for router
-    index = async (req: any, res: any) => {
-        try {
-            await this.svc.init();
 
-            const q = (req?.query ?? {}) as { cursor?: string; limit?: string | number };
+    override async index(req: HttpRequest) {
+        const cursor = Array.isArray(req.query?.cursor) ? req.query?.cursor[0] : req.query?.cursor;
+        const limit = Number(req.query?.limit) || 20;
 
-            const opts = {
-                cursor: typeof q.cursor === "string" ? q.cursor : undefined,
-                limit:
-                    typeof q.limit === "string"
-                        ? Number.isFinite(Number(q.limit)) ? Number(q.limit) : undefined
-                        : typeof q.limit === "number"
-                            ? q.limit
-                            : undefined,
-            };
+        return this.svc.list({ cursor, limit });
+    }
 
-            // match signature: (filter, opts)
-            const result = await this.svc.list({}, opts);
 
-            const items = result.items ?? [];
-            const total = result.total;
+    async create(_req: HttpRequest) {
+        // return defaults/metadata to create a tenant (like Laravel create)
+        return { ok: true, schema: this.svc.meta().schema, defaults: this.svc.meta().defaults };
+    }
 
-            return ok(res, {
-                ok: true,
-                count: total,
-                items,
-                nextCursor: result.nextCursor,
-            });
-        } catch (e: any) {
-            return serverError(res, e?.message || "Failed to list tenants");
-        }
-    };
+    async edit(req: HttpRequest) {
+        const id = req.params?.id!;
+        return this.svc.get(id);
+    }
+
+    async update(req: HttpRequest) {
+        const id = req.params?.id!;
+        return this.svc.update(id, req.body);
+    }
+
+    async store(req: HttpRequest) {
+        return this.svc.create(req.body);
+    }
+
+    async delete(req: HttpRequest) {
+        const id = req.params?.id!;
+        return this.svc.remove(id);
+    }
+
+    async print(req: HttpRequest) {
+        // could return printable payload; adapter decides headers/content-type
+        const id = req.params?.id!;
+        const data = await this.svc.get(id);
+        return { printable: true, format: "pdf-ready", data };
+    }
+
+    async upload(req: HttpRequest) {
+        // expects req.files (adapter-populated)
+        return this.svc.handleUpload(req.files, req.params);
+    }
+
+    async download(req: HttpRequest) {
+        // return a descriptor your adapter can turn into a stream/attachment
+        const id = req.params?.id!;
+        const file = await this.svc.getExport(id);
+        return { download: true, filename: file.name, mime: file.mime, stream: file.stream };
+    }
 }
