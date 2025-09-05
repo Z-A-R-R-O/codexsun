@@ -18,7 +18,7 @@ const fakeConnection = async (_profile: string) => ({
 });
 
 // Import middleware
-import { dbContextMiddleware } from "../cortex/http/middleware/db_context";
+import { dbContextMiddleware } from "../../../cortex/http/middleware/db_context";
 
 function makeReq(headers: Record<string, string> = {}, tenantId?: string) {
     return {

@@ -1,6 +1,6 @@
 // tests/route_registry.test.ts
 import assert from "node:assert/strict";
-import { RouteRegistery, type RouteProvider } from "../cortex/http/route_registery";
+import { RouteRegistery, type RouteProvider } from "../../../cortex/http/route_registery";
 
 export async function routeRegistryTests() {
     const A: RouteProvider = () => [
