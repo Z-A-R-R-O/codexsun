@@ -272,6 +272,31 @@ importers:
         specifier: ^5.9.2
         version: 5.9.2
 
+  apps/lms:
+    dependencies:
+      react-router-dom:
+        specifier: ^7.8.2
+        version: 7.8.2(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+      sqlite3:
+        specifier: ^5.1.6
+        version: 5.1.7
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.3
+        version: 5.0.3
+      '@types/node':
+        specifier: ^22.7.5
+        version: 22.18.0
+      chalk:
+        specifier: ^5.6.0
+        version: 5.6.0
+      express:
+        specifier: ^5.1.0
+        version: 5.1.0
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.2
+
   cortex:
     dependencies:
       chalk:

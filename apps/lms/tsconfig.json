@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "target": "ESNext",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "jsx": "react",
+    "types": ["node", "vite/client"]  // 👈 merged here
+  },
+  "include": [
+    "app.ts",
+    "src",
+    "vite.config.ts",
+    "**/*.tsx",
+    "resources/global/types"
+  ]
+}
