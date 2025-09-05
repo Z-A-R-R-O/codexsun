@@ -1,9 +1,10 @@
 // apps/cxsun/tenant/src/tenant/code/tenant.provider.ts
-
 import { existsSync, readdirSync } from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { App } from "../../../../../cortex/framework/application";
+import type { RouteConfig } from "../../../../../cortex/framework/route-registry";
+import type { RouteModule } from "../../../../../cortex/framework/types";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,11 +17,20 @@ export class TenantProvider {
     }
 
     async register() {
-        await this.registerRouteProviders();
-        this.app.getLogger().info("Tenant providers registered", {
-            context: "tenant-provider",
-            app: "tenant",
-        });
+        try {
+            await this.registerRouteProviders();
+            this.app.getLogger().info("Tenant providers registered", {
+                context: "tenant-provider",
+                app: "tenant",
+            });
+        } catch (err) {
+            this.app.getLogger().error(`Failed to register tenant providers: ${String(err)}`, {
+                context: "tenant-provider",
+                app: "tenant",
+                error: String(err),
+            });
+            throw err;
+        }
     }
 
     private async registerRouteProviders() {
@@ -42,9 +52,21 @@ export class TenantProvider {
             const providerName = path.basename(entry.name, path.extname(entry.name));
             try {
                 const mod = await import(pathToFileURL(routePath).href);
-                if (typeof mod.default === "function") {
-                    this.app.registerRoutes((app: App) => mod.default(app));
+                const routeModule = mod.default as RouteModule | ((app: App) => RouteConfig);
+                if (typeof routeModule === "function") {
+                    this.app.registerRoutes((app: App) => routeModule(app));
                     this.app.getLogger().info(`Route provider registered: ${providerName}`, {
+                        context: "tenant-provider",
+                        app: "tenant",
+                        provider: providerName,
+                    });
+                } else if (routeModule && ("routes" in routeModule || "register" in routeModule)) {
+                    if (routeModule.register) {
+                        await routeModule.register(this.app.registry);
+                    } else if (routeModule.routes) {
+                        this.app.registerRoutes(() => ({ path: "/", routes: routeModule.routes }));
+                    }
+                    this.app.getLogger().info(`Route module registered: ${providerName}`, {
                         context: "tenant-provider",
                         app: "tenant",
                         provider: providerName,
