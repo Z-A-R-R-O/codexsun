@@ -3,7 +3,7 @@ import { existsSync, readdirSync } from "fs";
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { App } from "../../../../../cortex/framework/application";
-import type { RouteConfig } from "../../../../../cortex/framework/route-registry";
+import type { RouteConfig, Route } from "../../../../../cortex/framework/route-registry";
 import type { RouteModule } from "../../../../../cortex/framework/types";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -62,7 +62,7 @@ export class TenantProvider {
                     });
                 } else if (routeModule && ("routes" in routeModule || "register" in routeModule)) {
                     if (routeModule.register) {
-                        await routeModule.register(this.app.registry);
+                        await routeModule.register(this.app.getRegistry());
                     } else if (routeModule.routes) {
                         this.app.registerRoutes(() => ({ path: "/", routes: routeModule.routes }));
                     }

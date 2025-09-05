@@ -7,8 +7,8 @@ interface Logger {
     error: (message: string, meta?: any) => void;
 }
 
-interface Route {
-    method: HttpMethod; // Aligned with types.ts
+export interface Route {
+    method: HttpMethod;
     path: string;
     handler?: (ctx: RequestContext) => Promise<Response> | Response;
     middleware?: Array<(ctx: RequestContext, next: () => void) => Promise<void>>;
@@ -20,7 +20,7 @@ interface Route {
     model?: { param: string; resolver: (id: string) => Promise<any> };
 }
 
-interface RouteConfig {
+export interface RouteConfig {
     path: string;
     routes: Route[];
     middleware?: Array<(ctx: RequestContext, next: () => void) => Promise<void>>;
@@ -116,7 +116,7 @@ export class RouteRegistry {
     }
 
     fallback(handler: Route["handler"], options: Partial<Route> = {}) {
-        this.fallbackRoute = { method: "GET", path: "*", handler, params: [], ...options }; // Changed ANY to GET
+        this.fallbackRoute = { method: "GET", path: "*", handler, params: [], ...options };
         this.logger.info("Fallback route registered", { context: "route-registry" });
     }
 
@@ -320,7 +320,7 @@ export class RouteRegistry {
                     if (route.rateLimit && !(await this.checkRateLimit(route, path, userId, ip))) {
                         return {
                             route: {
-                                method: "GET", // Use GET for error response
+                                method: "GET",
                                 path,
                                 handler: async () => new Response(JSON.stringify({ error: "Rate limit exceeded" }), { status: 429 })
                             },
@@ -341,7 +341,7 @@ export class RouteRegistry {
                             });
                             return {
                                 route: {
-                                    method: "GET", // Use GET for error response
+                                    method: "GET",
                                     path,
                                     handler: async () => new Response(JSON.stringify({ error: "Model resolution failed" }), { status: 500 })
                                 },
@@ -368,7 +368,7 @@ export class RouteRegistry {
                             if (route.rateLimit && !(await this.checkRateLimit(route, path, userId, ip))) {
                                 return {
                                     route: {
-                                        method: "GET", // Use GET for error response
+                                        method: "GET",
                                         path,
                                         handler: async () => new Response(JSON.stringify({ error: "Rate limit exceeded" }), { status: 429 })
                                     },
@@ -389,7 +389,7 @@ export class RouteRegistry {
                                     });
                                     return {
                                         route: {
-                                            method: "GET", // Use GET for error response
+                                            method: "GET",
                                             path,
                                             handler: async () => new Response(JSON.stringify({ error: "Model resolution failed" }), { status: 500 })
                                         },

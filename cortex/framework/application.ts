@@ -34,6 +34,10 @@ export class App {
         return this.di.resolve<Logger>("logger");
     }
 
+    getRegistry(): RouteRegistry {
+        return this.registry;
+    }
+
     registerService(name: string, factory: (app: App) => any, scope: "singleton" | "scoped" | "transient" = "scoped") {
         this.di.register(name, { type: scope, factory: () => factory(this) });
     }
