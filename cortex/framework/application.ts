@@ -1,7 +1,10 @@
 // cortex/framework/application.ts
 import type { RouteRegistry } from "./route-registry";
 import { Container } from "./container";
-import type { Logger } from "./types";
+import type { Logger, RouteModule } from "./types";
+import type { RouteConfig } from "./route-registry";
+
+export type { RouteConfig, RouteModule }; // Export types for use in tenant.provider.ts
 
 export class App {
     private di: Container;
@@ -44,5 +47,19 @@ export class App {
 
     registerRoutes(factory: (app: App) => any) {
         this.registry.addProvider((di: Container) => factory(this));
+    }
+
+    async registerRouteModule(module: RouteModule | ((app: App) => RouteConfig)) {
+        if (typeof module === "function") {
+            this.registerRoutes((app: App) => module(app));
+        } else if (module && ("routes" in module || "register" in module)) {
+            if (module.register) {
+                await module.register(this.getRegistry());
+            } else if (module.routes) {
+                this.registerRoutes(() => ({ path: "/", routes: module.routes }));
+            }
+        } else {
+            throw new Error("Invalid route module: must be a function or RouteModule");
+        }
     }
 }
