@@ -5,6 +5,9 @@ import { TenantService } from "./tenant.service";
 
 export class TenantController extends AbstractController {
   private svc: TenantService;
+    healthz: any;
+    list: any;
+    get: any;
 
   constructor(namespace = "default") {
     super();

@@ -2,7 +2,7 @@
 
 # Server
 
-- ### @: root folder/server.ts
+- ### @: root folder/index.ts
 - Starting point of Server with HTTP, HTTPs , sftp
 - 
 - ### @: root folder/cortex/main.ts

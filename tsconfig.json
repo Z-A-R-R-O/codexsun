@@ -22,7 +22,7 @@
     "types": ["node"]
   },
   "include": [
-    "server.ts",
+    "index.ts",
     "cortex/**/*.ts",
     "apps/**/*.ts"
   ]

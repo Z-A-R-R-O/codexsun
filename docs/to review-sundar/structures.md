@@ -42,7 +42,7 @@ A lightweight, scalable way to build multiple apps on top of a shared framework.
 │
 ├─ 🗃️ data/                        # datasets, fixtures, dumps
 ├─ 📖 docs/                        # product/repo docs (top-level)
-├─ 🚀 server.ts                    # entrypoint: boot + mount selected app
+├─ 🚀 index.ts                    # entrypoint: boot + mount selected app
 ├─ 📦 package.json
 ├─ 🧶 pnpm-workspace.yaml
 ├─ 🔒 tsconfig.json
@@ -90,7 +90,7 @@ A lightweight, scalable way to build multiple apps on top of a shared framework.
 
 ## 🛣️ Server boot & app mounting
 
-* `server.ts` is the single entrypoint.
+* `index.ts` is the single entrypoint.
 * It reads `APP=<appName>` and mounts `apps/<appName>`:
 
     1. Load app module (exports `manifest`, `routes`, optional `init`).
@@ -120,6 +120,6 @@ A lightweight, scalable way to build multiple apps on top of a shared framework.
 
 * [ ] `cortex` exports stable APIs; **no** app imports back into apps.
 * [ ] Each app owns its schema (`migration/`, `seed/`).
-* [ ] `server.ts` mounts chosen app via `APP` env.
+* [ ] `index.ts` mounts chosen app via `APP` env.
 * [ ] Engines + config come **only** from `cortex`.
 * [ ] Docs use numeric prefixes; emoji at the **front** of names.
