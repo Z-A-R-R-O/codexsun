@@ -1,12 +1,12 @@
 // cortex/framework/application.ts
 import type { RouteRegistry } from "./route-registry";
-import { DIContainer } from "./di";
+import { Container } from "./container";
 
 export class App {
-    private di: DIContainer;
+    private di: Container;
     private registry: RouteRegistry;
 
-    constructor(di: DIContainer, registry: RouteRegistry) {
+    constructor(di: Container, registry: RouteRegistry) {
         this.di = di;
         this.registry = registry;
     }
@@ -20,6 +20,6 @@ export class App {
     }
 
     registerRoutes(factory: (app: App) => any) {
-        this.registry.addProvider((di: DIContainer) => factory(this));
+        this.registry.addProvider((di: Container) => factory(this));
     }
 }
