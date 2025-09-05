@@ -6,7 +6,7 @@
 // - Test 4: Tenant Update (only if we have an ID)
 
 import assert from "node:assert/strict";
-import { bootstrap } from "../../../base/bootstrap";
+import { bootstrap, section } from "../../../base/bootstrap";
 
 function extractListItems(body: any): any[] {
     if (Array.isArray(body)) return body;
@@ -29,11 +29,15 @@ export async function tenantE2E(): Promise<void> {
     // ---------------- Test 1: Tenant Healthz ----------------
     {
         const path = "/api/tenants/hz";
-        logger.info("Test 1: Tenant Healthz — request", { method: "GET", url: baseURL + path });
+
+        section(logger, "Test 1: Tenant Healthz — request");
+        logger.info("GET " + baseURL + path);
 
         const res = await client.get(path);
 
-        logger.info("Test 1: Tenant Healthz — response", { status: res.status, body: res.json ?? res.text });
+        section(logger, "Test 1: Tenant Healthz — response");
+        logger.info(`status: ${res.status}`);
+        logger.info(res.json ?? res.text);
 
         assert.equal(res.status, 200, `expected 200, got ${res.status}`);
         if (res.json && typeof res.json === "object" && "ok" in res.json) {
@@ -44,14 +48,18 @@ export async function tenantE2E(): Promise<void> {
     }
 
     // ---------------- Test 2: Tenant List -------------------
-    let listItems: any[] = [];
+    let listItems: any[];
     {
         const path = "/api/tenants";
-        logger.info("Test 2: Tenant List — request", { method: "GET", url: baseURL + path });
+
+        section(logger, "Test 2: Tenant List — request");
+        logger.info("GET " + baseURL + path);
 
         const res = await client.get(path);
 
-        logger.info("Test 2: Tenant List — response", { status: res.status, body: res.json ?? res.text });
+        section(logger, "Test 2: Tenant List — response");
+        logger.info(`status: ${res.status}`);
+        logger.info(res.json ?? res.text);
 
         assert.equal(res.status, 200, `expected 200, got ${res.status}`);
         assert.equal(res.json?.ok, true, "expected body.ok === true");
@@ -72,11 +80,15 @@ export async function tenantE2E(): Promise<void> {
 
     if (candidateId) {
         const path = `/api/tenants/${candidateId}`;
-        logger.info("Test 3: Get by ID — request", { method: "GET", url: baseURL + path });
+
+        section(logger, "Test 3: Get by ID — request");
+        logger.info("GET " + baseURL + path);
 
         const res = await client.get(path);
 
-        logger.info("Test 3: Get by ID — response", { status: res.status, body: res.json ?? res.text });
+        section(logger, "Test 3: Get by ID — response");
+        logger.info(`status: ${res.status}`);
+        logger.info(res.json ?? res.text);
 
         expectOneOf(res.status, [200], "get tenant by id");
         const obj = res.json?.item ?? res.json;
@@ -88,11 +100,15 @@ export async function tenantE2E(): Promise<void> {
     } else {
         const fake = "ffffffffffffffffffffffff";
         const path = `/api/tenants/${fake}`;
-        logger.info("Test 3: Get by ID (fake) — request", { method: "GET", url: baseURL + path });
+
+        section(logger, "Test 3: Get by ID (fake) — request");
+        logger.info("GET " + baseURL + path);
 
         const res = await client.get(path);
 
-        logger.info("Test 3: Get by ID (fake) — response", { status: res.status, body: res.json ?? res.text });
+        section(logger, "Test 3: Get by ID (fake) — response");
+        logger.info(`status: ${res.status}`);
+        logger.info(res.json ?? res.text);
 
         expectOneOf(res.status, [404, 400], "get unknown tenant");
         logger.info("Test 3: Get by ID (fake) — ✅ passed", { id: fake });
@@ -101,13 +117,20 @@ export async function tenantE2E(): Promise<void> {
     // ---------------- Test 4: Update ------------------------
     if (candidateId) {
         const newName = `e2e-updated-${Date.now()}`;
+
         {
             const path = `/api/tenants/${candidateId}`;
-            logger.info("Test 4: Update — request (PATCH name)", { method: "PATCH", url: baseURL + path, body: { name: newName } });
+
+            section(logger, "Test 4: Update — request (PATCH name)");
+            logger.info("PATCH " + baseURL + path);
+            logger.info("body", { name: newName });
+
 
             const res = await client.patch(path, { name: newName });
 
-            logger.info("Test 4: Update — response", { status: res.status, body: res.json ?? res.text });
+            section(logger, "Test 4: Update — response");
+            logger.info(`status: ${res.status}`);
+            logger.info(res.json ?? res.text);
 
             expectOneOf(res.status, [200, 204], "update tenant");
 
@@ -120,11 +143,16 @@ export async function tenantE2E(): Promise<void> {
         }
         {
             const path = `/api/tenants/${candidateId}`;
-            logger.info("Test 4: Update — verify (GET after PATCH)", { method: "GET", url: baseURL + path });
+
+            section(logger, "Test 4: Update — verify (GET after PATCH)");
+            logger.info("GET " + baseURL + path);
 
             const res = await client.get(path);
 
-            logger.info("Test 4: Update — verify response", { status: res.status, body: res.json ?? res.text });
+            section(logger, "Test 4: Update — verify response");
+            logger.info(`status: ${res.status}`);
+            logger.info("body", res.json ?? res.text);
+
 
             expectOneOf(res.status, [200], "re-get after update");
             const obj = res.json?.item ?? res.json;
@@ -134,17 +162,25 @@ export async function tenantE2E(): Promise<void> {
         }
         {
             const path = `/api/tenants/${candidateId}`;
-            logger.info("Test 4: Update — immutable guard", { method: "PATCH", url: baseURL + path, body: { id: "nope" } });
+
+            section(logger, "Test 4: Update — immutable guard (PATCH id)");
+            logger.info("PATCH " + baseURL + path);
+            logger.info("body", { id: "nope" });
+
+
 
             const res = await client.patch(path, { id: "nope" });
 
-            logger.info("Test 4: Update — immutable guard response", { status: res.status, body: res.json ?? res.text });
+            section(logger, "Test 4: Update — immutable guard response");
+            logger.info(`status: ${res.status}`);
+            logger.info(res.json ?? res.text);
 
             expectOneOf(res.status, [400, 422], "immutable field rejection");
         }
 
         logger.info("Test 4: Update — ✅ passed", { id: candidateId });
     } else {
-        logger.info("Test 4: Update — skipped (no tenant id available; set E2E_TENANT_ID to exercise PATCH)");
+        section(logger, "Test 4: Update — skipped");
+        logger.info("no tenant id available; set E2E_TENANT_ID to exercise PATCH");
     }
 }

@@ -12,6 +12,16 @@ import { URL } from "url";
 
 // ----------------- Types -----------------
 export type LoggerLike = { info: (msg: string, meta?: any) => void; error?: (msg: string, meta?: any) => void };
+
+// --- NEW: simple section banner --------------------------------------------
+export function section(logger: LoggerLike, title: string, char: "_" | "-" | "=" = "_"): void {
+    const line = char.repeat(60);
+    logger.info("");              // blank spacer
+    logger.info(line);
+    logger.info(`  ${title}`);
+    logger.info(line);
+}
+
 export type NativeResponse = { status: number; headers: IncomingHttpHeaders; buffer: Buffer; text: string; json: any };
 export type SendFn = (method: string, path: string, body?: unknown, headers?: Record<string, string>) => Promise<NativeResponse>;
 
