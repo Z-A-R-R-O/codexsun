@@ -1,17 +1,18 @@
-// cortex/http/routes/welcome.ts
+// welcome.ts
+import type { App, RouteConfig } from "../../framework/application";
+import type { RequestContext, Route } from "../../framework/types";
 
-import type { RouteDef } from "../chttpx";
-
-export function routes(): RouteDef[] {
+// Keep your original function so you can test/use it directly
+export function routes(): Route[] {
     return [
         {
             method: "GET",
             path: "/",
-            handler: async (req, res) => {
+            handler: async (ctx: RequestContext) => {
                 const app = process.env.APP_NAME || "Codexsun";
                 const ver = process.env.APP_VERSION || "";
-                const sid = (req as any).session?.id || "—";
-                const tenantId = (req as any).tenant?.id || "—";
+                const sid = ctx.session?.id || "—";
+                const tenantId = ctx.tenant?.id || "—";
 
                 const html = `<!doctype html>
 <html lang="en">
@@ -59,10 +60,19 @@ export function routes(): RouteDef[] {
 </body>
 </html>`;
 
-                res.statusCode = 200;
-                res.setHeader("Content-Type", "text/html; charset=utf-8");
-                res.end(html);
+                return new Response(html, {
+                    status: 200,
+                    headers: { "Content-Type": "text/html; charset=utf-8" },
+                });
             },
         },
     ];
+}
+
+// Default export: (app) => RouteConfig
+export default function (_app: App): RouteConfig {
+    return {
+        path: "/",       // base path required
+        routes: routes() // your function above
+    };
 }

@@ -1,13 +1,17 @@
 // cortex/main.ts
 import { existsSync, readdirSync } from "fs";
 import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
+import { pathToFileURL } from "url";
 import { RouteRegistry } from "./framework/route-registry";
-import { DIContainer } from "./framework/di";
+import { Container } from "./framework/container"; // Use Container instead of DIContainer
 import { App } from "./framework/application";
+import type { Logger } from "./framework/types";
+
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = dirname(__filename);
 
 function parseList(v?: string): string[] {
     return v ? v.split(/[;,]/).map(s => s.trim()).filter(Boolean) : [];
@@ -22,10 +26,29 @@ function candidateDirs(): string[] {
     ];
 }
 
-export async function registerApps(diContainer: DIContainer) {
-    const routeRegistry = new RouteRegistry();
-    diContainer.register("routeRegistry", { type: "singleton", value: routeRegistry });
-    const app = new App(diContainer, routeRegistry);
+export async function registerApps(container: Container): Promise<App> {
+    // Register default logger if not present
+    if (!container.services.has("logger")) {
+        container.register("logger", {
+            type: "singleton",
+            factory: () => ({
+                debug: (...args: unknown[]) => console.debug("[app]", ...args),
+                info: (...args: unknown[]) => console.info("[app]", ...args),
+                warn: (...args: unknown[]) => console.warn("[app]", ...args),
+                error: (...args: unknown[]) => console.error("[app]", ...args),
+                child: (scope: string) => ({
+                    debug: (...args: unknown[]) => console.debug(`[app:${scope}]`, ...args),
+                    info: (...args: unknown[]) => console.info(`[app:${scope}]`, ...args),
+                    warn: (...args: unknown[]) => console.warn(`[app:${scope}]`, ...args),
+                    error: (...args: unknown[]) => console.error(`[app:${scope}]`, ...args),
+                }),
+            }),
+        });
+    }
+
+    const routeRegistry = new RouteRegistry(container);
+    container.register("routeRegistry", { type: "singleton", value: routeRegistry });
+    const app = new App(container, routeRegistry);
 
     const dirs = candidateDirs();
     let registered = 0;
@@ -44,7 +67,7 @@ export async function registerApps(diContainer: DIContainer) {
             ];
             const appPath = candidates.find(p => existsSync(p));
             if (!appPath) {
-                diContainer.resolve("logger").warn(`⚠️ Skipping ${entry.name}: no app.ts found`, {
+                container.resolve<Logger>("logger").warn(`⚠️ Skipping ${entry.name}: no app.ts found`, {
                     context: "app-loader",
                     app: entry.name,
                 });
@@ -57,30 +80,33 @@ export async function registerApps(diContainer: DIContainer) {
                 if (typeof fn === "function") {
                     await fn(app);
                     registered++;
-                    diContainer.resolve("logger").info(`✅ Registered app: ${entry.name}`, {
+                    container.resolve<Logger>("logger").info(`✅ Registered app: ${entry.name}`, {
                         context: "app-loader",
                         app: entry.name,
                     });
                 } else {
-                    diContainer.resolve("logger").warn(`⚠️ ${entry.name} has no valid registerApp`, {
+                    container.resolve<Logger>("logger").warn(`⚠️ ${entry.name} has no valid registerApp`, {
                         context: "app-loader",
                         app: entry.name,
                     });
                 }
             } catch (err) {
-                diContainer.resolve("logger").error(`⚠️ Failed to load app ${entry.name}`, {
+                container.resolve<Logger>("logger").error(`⚠️ Failed to load app ${entry.name}`, {
                     error: String(err),
                     context: "app-loader",
                     app: entry.name,
                 });
+                throw err; // Propagate error to caller
             }
         }
     }
 
     if (!registered) {
-        diContainer.resolve("logger").warn(
+        container.resolve<Logger>("logger").warn(
             "ℹ️ No apps registered. Set APPS_DIR to your apps root.",
             { context: "app-loader" }
         );
     }
+
+    return app; // Return the App instance
 }
