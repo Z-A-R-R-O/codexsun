@@ -5,7 +5,7 @@
 ---
 
 
-# Server Entry Point (`server.ts`)
+# Server Entry Point (`index.ts`)
 
 This file is the main starting point for the application server. It sets up environment variables, logging, database
 initialization, HTTP/HTTPS servers, middleware, and routes.

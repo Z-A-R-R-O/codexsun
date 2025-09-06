@@ -18,7 +18,7 @@ Below is the detailed repository structure with folders and files explained.
 ├── 📄 package.json
 ├── 📄 pnpm-lock.yaml
 ├── 📄 pnpm-workspace.yaml
-├── 🖥️ server.ts                     # server entry, bootstraps app
+├── 🖥️ index.ts                     # server entry, bootstraps app
 ├── 📄 tsconfig.json
 │
 ├── 🧩 cortex/                       # framework (shared infra)

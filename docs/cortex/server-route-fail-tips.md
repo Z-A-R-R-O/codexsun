@@ -69,7 +69,7 @@ logger.info("✅ Master DB initialized and core schema ready");
                     handler: async (_req, res) => {
                         res.statusCode = 200;
                         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-                        res.end(JSON.stringify({ ok: true, from: 'server.ts/providers[]' }));
+                        res.end(JSON.stringify({ ok: true, from: 'index.ts/providers[]' }));
                     },
                 }],
 

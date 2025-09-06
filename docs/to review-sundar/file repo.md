@@ -582,7 +582,7 @@ apps/cxsun/modules/auth/
 
 # wiring (high level)
 
-* server entry (`/server.ts`) mounts `apps/cxsun` app → registers `core/http` middlewares/guards/interceptors → mounts modules (`/modules/tenant`, `/modules/user`, `/modules/auth`) → each controller maps 1:1 to **action** files.
+* server entry (`/index.ts`) mounts `apps/cxsun` app → registers `core/http` middlewares/guards/interceptors → mounts modules (`/modules/tenant`, `/modules/user`, `/modules/auth`) → each controller maps 1:1 to **action** files.
 
 ---
 

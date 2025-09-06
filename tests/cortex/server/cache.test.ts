@@ -1,6 +1,6 @@
 // tests/cache.test.ts
 import assert from "node:assert/strict";
-import { createCache } from "../cortex/http/cache";
+import { createCache } from "../../../cortex/http/cache";
 
 export async function cacheTests() {
     const cache = createCache({ driver: "memory", namespace: "test", json: true });
