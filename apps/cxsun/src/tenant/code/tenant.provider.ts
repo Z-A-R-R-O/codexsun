@@ -1,11 +1,16 @@
 // apps/cxsun/tenant/src/tenant/code/tenant.provider.ts
+
 import { existsSync, readdirSync } from "fs";
 import path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
-import { App } from "../../../../../cortex/framework/application"; // Import types from application.ts
+import {  pathToFileURL } from "url";
+import { App } from "../../../../../cortex/framework/application";
+
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+import * as fs from "node:fs";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname = dirname(__filename);
 
 export class TenantProvider {
     private app: App;
@@ -32,38 +37,76 @@ export class TenantProvider {
     }
 
     private async registerRouteProviders() {
-        const routesDir = path.join(__dirname, "routes");
-        if (!existsSync(routesDir)) {
-            this.app.getLogger().warn("No routes directory found", {
-                context: "tenant-provider",
-                app: "tenant",
-            });
-            return;
-        }
+        const logger = this.app.getLogger();
 
-        const entries = readdirSync(routesDir, { withFileTypes: true }).filter(
-            (d) => d.isFile() && d.name.includes("tenant.routes") && (d.name.endsWith(".ts") || d.name.endsWith(".js"))
-        );
+        // Step 1: Check for tenant.routes.ts or tenant.routes.js in the same directory
+        const tenantRouteFiles = ["tenant.routes.ts", "tenant.routes.js"];
+        let routeFileFound = false;
 
-        for (const entry of entries) {
-            const routePath = path.join(routesDir, entry.name);
-            const providerName = path.basename(entry.name, path.extname(entry.name));
-            try {
-                const mod = await import(pathToFileURL(routePath).href);
-                await this.app.registerRouteModule(mod.default); // Use new method
-                this.app.getLogger().info(`Route module registered: ${providerName}`, {
-                    context: "tenant-provider",
-                    app: "tenant",
-                    provider: providerName,
-                });
-            } catch (err) {
-                this.app.getLogger().error(`Failed to load route provider: ${providerName}`, {
-                    error: String(err),
-                    context: "tenant-provider",
-                    app: "tenant",
-                    provider: providerName,
-                });
+        for (const fileName of tenantRouteFiles) {
+            const routePath = path.join(__dirname, fileName);
+            if (fs.existsSync(routePath)) {
+                try {
+                    const mod = await import(pathToFileURL(routePath).href);
+                    await this.app.registerRouteModule(mod.default);
+                    logger.info(`Route module registered: ${fileName}`, {
+                        context: "tenant-provider",
+                        app: "tenant",
+                        provider: fileName,
+                    });
+                    routeFileFound = true;
+                } catch (err) {
+                    logger.error(`Failed to load route provider: ${fileName}`, {
+                        error: String(err),
+                        context: "tenant-provider",
+                        app: "tenant",
+                        provider: fileName,
+                    });
+                }
             }
         }
+
+        // Step 2: Fallback to checking routes directory if no tenant.routes file found
+        if (!routeFileFound) {
+            const routesDir = path.join(__dirname, "routes");
+            if (!fs.existsSync(routesDir)) {
+                logger.warn(`No routes directory found at ${routesDir}`, {
+                    context: "tenant-provider",
+                    app: "tenant",
+                });
+                return;
+            }
+
+            const entries = fs.readdirSync(routesDir, { withFileTypes: true }).filter(
+                (d) => d.isFile() && d.name.includes("tenant.routes") && (d.name.endsWith(".ts") || d.name.endsWith(".js"))
+            );
+
+            for (const entry of entries) {
+                const routePath = path.join(routesDir, entry.name);
+                const providerName = path.basename(entry.name, path.extname(entry.name));
+                try {
+                    const mod = await import(pathToFileURL(routePath).href);
+                    await this.app.registerRouteModule(mod.default);
+                    logger.info(`Route module registered: ${providerName}`, {
+                        context: "tenant-provider",
+                        app: "tenant",
+                        provider: providerName,
+                    });
+                } catch (err) {
+                    logger.error(`Failed to load route provider: ${providerName}`, {
+                        error: String(err),
+                        context: "tenant-provider",
+                        app: "tenant",
+                        provider: providerName,
+                    });
+                }
+            }
+        }
+
+        logger.info("Tenant providers registered", {
+            context: "tenant-provider",
+            app: "tenant",
+        });
     }
+
 }

@@ -35,7 +35,7 @@ async function main() {
         logger.info("✅ Master DB initialized and core schema ready");
 
         // 3) load all apps discovered by cortex/main.ts
-        // await registerApps(registry);
+        await registerApps(registry);
 
         // Boot servers
         await bootAll({

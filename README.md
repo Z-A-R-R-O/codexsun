@@ -44,3 +44,4 @@ Run the following command to apply migrations:
 pnpm cx migrate fresh 
 ```
 
+add docs

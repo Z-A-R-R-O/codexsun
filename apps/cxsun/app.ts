@@ -1,21 +1,37 @@
-// apps/cxsun/app.ts
-import { App } from "../../cortex/framework/application";
-import { TenantProvider } from "./src/tenant/code/tenant.provider";
+import type { RouteRegistery, RouteProvider } from '../../cortex/http/route_registery';
+import { tenantRoutes} from './src/tenant/code/tenant.routes';
 
-export async function registerApp(app: App): Promise<void> {
-    try {
-        const tenantProvider = new TenantProvider(app);
-        await tenantProvider.register();
-        app.getLogger().info("Cxsun app fully registered", {
-            context: "app-loader",
-            app: "cxsun",
-        });
-    } catch (err) {
-        app.getLogger().error(`Failed to register cxsun app: ${String(err)}`, {
-            context: "app-loader",
-            app: "cxsun",
-            error: String(err),
-        });
-        throw err; // Propagate error to prevent partial setup
-    }
+export async function registerApp(registry: RouteRegistery) {
+    registry.addProvider(tenantRoutes);
 }
+
+
+
+
+
+
+
+
+
+// import type { RouteRegistery, RouteProvider } from '../../cortex/http/route_registery';
+// import { tenantRoutes} from './src/tenant/code/tenant.api';
+// // import { json } from '../../cortex/http/chttpx';
+//
+// // Simple test provider to verify this app is mounted correctly
+// // const testRouteProvider: RouteProvider = () => [
+// //     {
+// //         method: 'GET',
+// //         path: '/api/_app_ping', // exact match (chttpx matches strings or RegExp only)
+// //         handler: async (_req, res) => {
+// //             json(res, { ok: true, app: 'cxsun', from: 'apps/cxsun/app.ts' }, 200);
+// //         },
+// //     },
+// // ];
+//
+// export async function registerApp(registry: RouteRegistery) {
+//     // 1) Add a test route to confirm this app is being loaded
+//     // registry.addProvider(testRouteProvider);
+//
+//     // 2) Mount the tenant API route provider (/api/tenants, /api/tenants/healthz, etc.)
+//     registry.addProvider(tenantRoutes);
+// }
