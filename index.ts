@@ -1,3 +1,5 @@
+// server.ts
+
 import "dotenv/config";
 import path from "node:path";
 import { createLogger  } from "./cortex/log/logger";

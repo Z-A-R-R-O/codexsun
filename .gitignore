@@ -17,3 +17,6 @@ yarn-error.log*
 .idea/
 .vscode/
 /data/
+.obsidian/
+/apps/lms/Incepts/.obsidian/
+/storage/logs/app.log

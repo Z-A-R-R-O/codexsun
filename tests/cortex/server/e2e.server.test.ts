@@ -9,14 +9,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 // ✅ FIXED PATHS (framework/* instead of http/*)
-import { createNodeServer, type RouteDef, json } from "../cortex/http/chttpx"; // <- if your file is chttpx.ts
-import { createSessionMiddleware } from "../cortex/http/middleware/session";
-import { tenantMiddleware } from "../cortex/http/middleware/tenant";
-import * as welcome from "../cortex/http/routes/welcome";
-import * as health from "../cortex/http/routes/health";
-import { createServerLogger } from "../cortex/log/logger";
-import { loadConfig } from "../cortex/http/config";
-import { createCache } from "../cortex/http/cache";
+import { createNodeServer, type RouteDef, json } from "../../../cortex/http/chttpx"; // <- if your file is chttpx.ts
+import { createSessionMiddleware } from "../../../cortex/http/middleware/session";
+import { tenantMiddleware } from "../../../cortex/http/middleware/tenant";
+import * as welcome from "../../../cortex/http/routes/welcome";
+import * as health from "../../../cortex/http/routes/health";
+import { createServerLogger } from "../../../cortex/log/logger";
+import { loadConfig } from "../../../cortex/http/config";
+import { createCache } from "../../../cortex/http/cache";
 
 // ---------- small helpers (no supertest) ----------
 class CookieJar {

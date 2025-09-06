@@ -3,18 +3,27 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.cjs"
+    }
+  },
   "packageManager": "pnpm@9.0.0",
   "workspaces": [
     "cortex",
     "apps/*"
   ],
   "scripts": {
-    "dev:api": "tsx watch server.ts",
+    "dev:api": "tsx watch index.ts",
     "dev:web": "vite --config apps/cxsun/vite.config.ts",
     "dev": "run-p dev:api dev:web",
     "build": "pnpm -r run build",
-    "build:api": "tsup server.ts --format esm --dts --out-dir dist --clean",
-    "start": "node dist/server.js",
+    "build:api": "tsup --config tsup.config.ts",
+    "start": "node dist/index.mjs",
     "clean:all": "pnpm -r run --if-present clean && pnpm prune && pnpm store prune",
     "cx": "tsx cortex/cli/index.ts",
     "tests": "tsx tests/test.ts"

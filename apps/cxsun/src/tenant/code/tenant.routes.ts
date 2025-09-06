@@ -70,6 +70,17 @@ export function tenantRoutes() {
   const route = new Router();
   const ctx = new TenantController();
 
+    // If you have a router instance called `router`:
+    route.get('/api/tenants/hz', (req: any, res: any) => {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        res.statusCode = 200
+        res.end(JSON.stringify({
+            ok: true,
+            scope: 'tenants',
+            time: new Date().toISOString(),
+        }))
+    })
+
   // list + create meta
   route.get("/api/tenants", withHandler(ctx.index.bind(ctx))).named("tenants:index");
   route.get("/api/tenants/create", withHandler(ctx.create.bind(ctx))).named("tenants:create");
